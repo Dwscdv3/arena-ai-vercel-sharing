@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | 油猴用户脚本 | `userscript/arena-ai-share.user.js` | 在 arena.ai 页面抓取当前对话（优先按每条消息旁的「复制」按钮定位消息容器，提示词与两侧回答都能抓到，通用选择器兜底），审核后 POST 给后端 |
 | 后端 API | `api/` | Vercel serverless functions，零依赖，直接调用 Upstash/Vercel KV REST API |
-| 分享页 | `public/share.html` | `share.html?id=<uuid>`，对话界面风格、黑白双主题（跟随 `prefers-color-scheme`）、无顶栏/无标题、渲染 v1.6.0 起的语义 HTML（旧分享回退 Markdown）；**每一轮对话下方各有独立投票区**（「哪个回答更好？」+ 4 个按钮），投完某一轮才在该轮回答栏头部揭晓模型名 |
+| 分享页 | `public/share.html` | `share.html?id=<uuid>`，对话界面风格、黑白双主题（跟随 `prefers-color-scheme`）、无顶栏/无标题、渲染 v1.6.0 起的语义 HTML（不再做 Markdown 渲染，HTML 原样呈现）；**每一轮对话下方各有独立投票区**（「哪个回答更好？」+ 4 个按钮），投完某一轮才在该轮回答栏头部揭晓模型名 |
 | 管理页 | `public/admin.html` | `/admin.html`，token 登录后查看所有分享的投票统计，含**每一轮对话**的明细 |
 | 首页 | `public/index.html` | 项目说明 |
 
@@ -71,7 +71,7 @@ GET /api/admin/votes  ← Bearer <SHARE_TOKEN>，/admin.html 页面渲染统计
 1. 在 arena.ai 打一场 battle，回答生成完毕后点右下角「分享对话」。
 2. 检查抓取结果（抓取优先以复制按钮为锚点定位每条消息；arena.ai 的 DOM 会变化，抓不准就手动编辑 JSON；模型名可删掉保持匿名）。
 3. 点「生成分享链接」，把 `/share.html?id=<uuid>` 链接发出去。
-   - v1.6.0 起脚本抓取**清洗后的语义 HTML**（`innerHTML` 去掉 style/class/id、脚本/样式块、复制/点赞等按钮，仅保留 p/ul/ol/li/pre/code/table/h* 等语义标签，`a[href]`、`img[src|alt]` 保留），Markdown 渲染出的粗体、列表、代码块、表格都能原样展示；旧分享仍按 Markdown 渲染。渲染时会**补齐遗漏的 Markdown**（`**粗体**`、`*斜体*`、`~~删除线~~`、`` `行内代码` ``、`[链接](url)`，`pre/code` 内不处理）。补齐不仅作用于 HTML 回答，也作用于 marked 的产物——CommonMark 的定界符冰柱规则会把 `他说**“甲”（乙）**完` 这类「`**` 紧贴特殊符号且左侧是中文文字」的标记原样保留，补齐逻辑在 marked 输出的文本节点里再扫一次，让这类加粗也能生效；标题元素按普通网页的字号层级和间距显示；提示词带的 HTML 只用于分享页渲染，标签页标题与 `/admin.html` 中的标题/提示词一律以纯文本显示（剥标签 + 还原转义实体）。
+   - v1.6.0 起脚本抓取**清洗后的语义 HTML**（`innerHTML` 去掉 style/class/id、脚本/样式块、复制/点赞等按钮，仅保留 p/ul/ol/li/pre/code/table/h* 等语义标签，`a[href]`、`img[src|alt]` 保留），分享页**直接原样呈现**抓取到的 HTML（仅过 DOMPurify 清洗，不再做任何 Markdown 渲染或补齐；旧分享里的 Markdown 文本按纯文本原样显示并保留换行）；标题元素按普通网页的字号层级和间距显示，h1~h6 有明显层级；提示词带的 HTML 只用于分享页渲染，标签页标题与 `/admin.html` 中的标题/提示词一律以纯文本显示（剥标签 + 还原转义实体）。
 4. 访客对每一轮分别投票后，才能看到对应轮的模型名；你自己在 `/admin.html` 输入 SHARE_TOKEN 查看每条分享的分轮次 A/B/平局/都差票数与整场合计。
 
 ## API
