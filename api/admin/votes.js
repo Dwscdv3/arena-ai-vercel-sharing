@@ -5,10 +5,7 @@ const { sendJson, isAuthorized, baseUrl, handleKvUnavailable, parseVotesDoc, EMP
 
 function snippet(text, max) {
   const clean = String(text || '')
-    .replace(/<[^>]*>/g, ' ')          // 新版分享存的是 HTML：剥掉标签再显示
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+    .replace(/<[^>]*>/g, ' ')          // 新版分享存的是 HTML：先剥掉标签
     .replace(/\s+/g, ' ')
     .trim();
   if (clean.length <= max) return clean;

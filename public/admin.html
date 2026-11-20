@@ -123,6 +123,24 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
+  // 还原 HTML 转义实体（named + numeric）；不会执行脚本
+  function decodeEntities(text) {
+    var el = document.createElement('textarea');
+    el.innerHTML = String(text == null ? '' : text);
+    return el.value;
+  }
+
+  // 纯文本化：剥掉标签、还原实体、压缩空白——提示词 HTML 只允许在分享页渲染，其余场合一律显示纯文本
+  function plainText(text) {
+    var stripped = String(text == null ? '' : text)
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return decodeEntities(stripped).replace(/\s+/g, ' ').trim();
+  }
+
   function formatDate(iso) {
     if (!iso) return '—';
     try { return new Date(iso).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'short' }); }
@@ -138,13 +156,16 @@
       return '<tr><td colspan="7" style="color:var(--muted)">（无轮次数据）</td></tr>';
     }
     return turns.map(function (t) {
-      var modelsLine = (t.models && (t.models.a || t.models.b))
-        ? '<div class="turn-models">A：' + escapeHtml(t.models.a || '?') + ' · B：' + escapeHtml(t.models.b || '?') + '</div>'
+      var plainPrompt = plainText(t.prompt);
+      var modelA = plainText(t.models && t.models.a);
+      var modelB = plainText(t.models && t.models.b);
+      var modelsLine = (modelA || modelB)
+        ? '<div class="turn-models">A：' + escapeHtml(modelA || '?') + ' · B：' + escapeHtml(modelB || '?') + '</div>'
         : '';
       return (
         '<tr>' +
           '<td>第 ' + (t.index + 1) + ' 轮</td>' +
-          '<td class="prompt-cell" title="' + escapeHtml(t.prompt) + '">' + escapeHtml(t.prompt || '（无提示词）') + modelsLine + '</td>' +
+          '<td class="prompt-cell" title="' + escapeHtml(plainPrompt) + '">' + escapeHtml(plainPrompt || '（无提示词）') + modelsLine + '</td>' +
           '<td>' + t.tallies.a + '</td>' +
           '<td>' + t.tallies.b + '</td>' +
           '<td>' + t.tallies.tie + '</td>' +
@@ -157,13 +178,16 @@
 
   function renderShare(s) {
     var perTurn = (s.turns || []).some(function (t) { return t.models && (t.models.a || t.models.b); });
-    var models = s.models
-      ? ('模型：A = ' + s.models.a + '，B = ' + s.models.b)
+    var plainTitle = plainText(s.title) || String(s.id || '');
+    var plainA = plainText(s.models && s.models.a);
+    var plainB = plainText(s.models && s.models.b);
+    var models = (plainA || plainB)
+      ? ('模型：A = ' + plainA + '，B = ' + plainB)
       : (perTurn ? '模型：见各轮' : '模型：未揭晓');
     return (
       '<section class="share">' +
         '<div class="share-head">' +
-          '<a class="title" href="' + escapeHtml(s.url) + '" target="_blank" rel="noopener noreferrer" title="' + escapeHtml(s.title) + '">' + escapeHtml(s.title || s.id) + '</a>' +
+          '<a class="title" href="' + escapeHtml(s.url) + '" target="_blank" rel="noopener noreferrer" title="' + escapeHtml(plainTitle) + '">' + escapeHtml(plainTitle) + '</a>' +
           '<span class="date">' + escapeHtml(formatDate(s.created_at)) + '</span>' +
           '<span class="models">' + escapeHtml(models) + '</span>' +
           '<span class="overall">' + escapeHtml(overallLine(s.tallies)) + '</span>' +
