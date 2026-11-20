@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arena Blind Share — 匿名对话分享</title>
+<meta name="description" content="把 arena.ai 上的对战对话保存下来，生成匿名分享链接：模型名称默认隐藏，投票后才揭晓，投票结果被记录。">
+<link rel="icon" href="/favicon.svg">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    min-height: 100vh;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: radial-gradient(1200px 600px at 50% -10%, #1e293b 0%, #0f1117 55%) fixed, #0f1117;
+    color: #e2e8f0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0 20px;
+  }
+  main { max-width: 720px; width: 100%; padding: 72px 0 48px; text-align: center; }
+  .logo { width: 84px; height: 84px; margin: 0 auto 28px; }
+  h1 { font-size: 2rem; letter-spacing: -0.02em; font-weight: 700; }
+  h1 .accent { background: linear-gradient(90deg, #7dd3fc, #f472b6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  p.lead { margin: 18px auto 0; max-width: 560px; color: #94a3b8; font-size: 1.05rem; line-height: 1.8; }
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 40px; text-align: left; }
+  @media (max-width: 640px) { .cards { grid-template-columns: 1fr; } }
+  .card { background: rgba(30, 41, 59, 0.45); border: 1px solid rgba(148, 163, 184, 0.12); border-radius: 14px; padding: 18px; }
+  .card svg { width: 22px; height: 22px; stroke: #7dd3fc; margin-bottom: 10px; }
+  .card h2 { font-size: 0.95rem; color: #e2e8f0; margin-bottom: 6px; }
+  .card p { font-size: 0.85rem; color: #94a3b8; line-height: 1.7; }
+  .actions { margin-top: 40px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  a.btn { text-decoration: none; border-radius: 10px; padding: 11px 20px; font-size: 0.92rem; font-weight: 600; }
+  a.btn-primary { background: #e2e8f0; color: #0f1117; }
+  a.btn-ghost { border: 1px solid rgba(148,163,184,.35); color: #cbd5e1; }
+  footer { color: #475569; font-size: 0.8rem; padding: 24px 0 32px; }
+  code { background: #1e293b; padding: 2px 6px; border-radius: 6px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<main>
+  <svg class="logo" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+    <circle cx="22" cy="24" r="13" stroke="#7dd3fc" stroke-width="4"/>
+    <circle cx="42" cy="24" r="13" stroke="#f472b6" stroke-width="4"/>
+    <path d="M12 48h40" stroke="#e2e8f0" stroke-width="4" stroke-linecap="round"/>
+  </svg>
+  <h1>Arena <span class="accent">Blind Share</span></h1>
+  <p class="lead">把 <a href="https://arena.ai" style="color:#7dd3fc">arena.ai</a> 上的对战对话一键保存，生成公开可访问的匿名分享链接。模型名称默认隐藏，访客投票之后才揭晓，每一轮投票都会被记录。</p>
+
+  <div class="cards">
+    <div class="card">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 4.42"/><path d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07l1.33-1.32"/></svg>
+      <h2>一键生成分享链接</h2>
+      <p>通过油猴用户脚本在 arena.ai 页面抓取当前对话，调用后端接口获得 <code>/share.html?id=&lt;uuid&gt;</code> 形式的链接。</p>
+    </div>
+    <div class="card">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-6"/></svg>
+      <h2>先投票，后揭晓</h2>
+      <p>访客看到的是匿名的“模型 A / 模型 B”。投出 A 更好、B 更好、平局或两个都差之后，真实模型名称才会显示。</p>
+    </div>
+    <div class="card">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+      <h2>投票结果可查</h2>
+      <p>每次投票都计入存储。站点所有者可用 secret token 访问 <code>/admin.html</code> 查看每个分享链接的详细票数。</p>
+    </div>
+  </div>
+
+  <div class="actions">
+    <a class="btn btn-primary" href="https://github.com/Dwscdv3/arena-ai-vercel-sharing">GitHub 仓库</a>
+    <a class="btn btn-ghost" href="/admin.html">管理员入口</a>
+  </div>
+</main>
+<footer>Arena Blind Share · 开源于 GitHub</footer>
+</body>
+</html>
