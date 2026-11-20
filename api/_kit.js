@@ -96,6 +96,59 @@ function handleKvUnavailable(res, err) {
   return false;
 }
 
+// ---------- 投票存储（每轮分别计票） ----------
+// KV 文档 votes:<id> 的结构：
+//   { a, b, tie, bad,            // 全场总票数（兼容旧版平铺字段）
+//     turns: { "<轮次>": { a, b, tie, bad } } }  // 每轮明细（旧数据没有该字段）
+const EMPTY_TALLIES = Object.freeze({ a: 0, b: 0, tie: 0, bad: 0, total: 0 });
+
+function normalizeTally(raw) {
+  const o = raw && typeof raw === 'object' ? raw : {};
+  const a = Number(o.a) || 0;
+  const b = Number(o.b) || 0;
+  const tie = Number(o.tie) || 0;
+  const bad = Number(o.bad) || 0;
+  return { a, b, tie, bad, total: a + b + tie + bad };
+}
+
+function parseVotesDoc(raw) {
+  let doc = {};
+  if (raw) {
+    try { doc = JSON.parse(raw); } catch { doc = {}; }
+  }
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) doc = {};
+  const overall = normalizeTally(doc);
+  const turns = {};
+  if (doc.turns && typeof doc.turns === 'object' && !Array.isArray(doc.turns)) {
+    for (const key of Object.keys(doc.turns)) {
+      if (/^\d+$/.test(key)) turns[key] = normalizeTally(doc.turns[key]);
+    }
+  }
+  return { overall, turns };
+}
+
+function serializeVotesDoc(overall, turns) {
+  const turnsOut = {};
+  for (const key of Object.keys(turns)) {
+    const t = normalizeTally(turns[key]);
+    turnsOut[key] = { a: t.a, b: t.b, tie: t.tie, bad: t.bad };
+  }
+  return JSON.stringify({
+    a: overall.a,
+    b: overall.b,
+    tie: overall.tie,
+    bad: overall.bad,
+    turns: turnsOut,
+  });
+}
+
+function bumpTally(t, choice) {
+  const next = { ...t };
+  next[choice] = (Number(next[choice]) || 0) + 1;
+  next.total = next.a + next.b + next.tie + next.bad;
+  return next;
+}
+
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -117,4 +170,9 @@ module.exports = {
   handleKvUnavailable,
   setCors,
   UUID_RE,
+  EMPTY_TALLIES,
+  normalizeTally,
+  parseVotesDoc,
+  serializeVotesDoc,
+  bumpTally,
 };

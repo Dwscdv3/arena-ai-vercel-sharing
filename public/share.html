@@ -136,16 +136,16 @@
   .md hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
   .md img { max-width: 100%; }
 
-  /* ---------- 投票区（仅标题 + 4 个按钮） ---------- */
-  .vote-panel {
-    margin-top: 28px;
+  /* ---------- 每轮投票区（仅标题 + 4 个按钮） ---------- */
+  .turn-vote {
+    margin-top: 12px;
     border: 1px solid var(--border);
     background: var(--card);
-    border-radius: 16px;
-    padding: 20px;
+    border-radius: 14px;
+    padding: 14px 16px;
     text-align: center;
   }
-  .vote-panel h2 { font-size: 1.05rem; font-weight: 700; margin-bottom: 14px; }
+  .turn-vote h2 { font-size: 0.98rem; font-weight: 700; margin-bottom: 12px; }
   .vote-buttons { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
   button.vote-btn {
     cursor: pointer;
@@ -194,16 +194,6 @@
 
   <article id="content" hidden>
     <div id="turns"></div>
-
-    <section class="vote-panel" id="vote-panel">
-      <h2>哪个回答更好？</h2>
-      <div class="vote-buttons">
-        <button class="vote-btn" data-choice="a">A 更好</button>
-        <button class="vote-btn" data-choice="b">B 更好</button>
-        <button class="vote-btn" data-choice="tie">平局</button>
-        <button class="vote-btn" data-choice="bad">两个都差</button>
-      </div>
-    </section>
   </article>
 </main>
 
@@ -247,16 +237,30 @@
     return side === 'a' ? '模型 A' : '模型 B';
   }
 
-  var state = { models: null, voted: false };
+  var state = { models: null, votedTurns: [] };
 
-  function applyHeaders() {
-    $$('.cell-title[data-side]').forEach(function (el) {
-      el.textContent = modelLabel(state.models, el.getAttribute('data-side'));
+  function isTurnVoted(index) {
+    return state.votedTurns.indexOf(index) !== -1;
+  }
+
+  function applyHeaders(turnIndex) {
+    var root = $('.turn[data-turn="' + turnIndex + '"]');
+    if (!root) return;
+    var show = isTurnVoted(turnIndex) && Boolean(state.models);
+    $$('.cell-title[data-side]', root).forEach(function (el) {
+      var side = el.getAttribute('data-side');
+      el.textContent = show ? modelLabel(state.models, side) : (side === 'a' ? '模型 A' : '模型 B');
     });
   }
 
-  function disableVoteButtons(chosen) {
-    $$('button.vote-btn').forEach(function (btn) {
+  function applyAllHeaders() {
+    $$('.turn[data-turn]').forEach(function (el) {
+      applyHeaders(Number(el.getAttribute('data-turn')));
+    });
+  }
+
+  function disableTurnButtons(turnIndex, chosen) {
+    $$('.turn[data-turn="' + turnIndex + '"] button.vote-btn').forEach(function (btn) {
       btn.disabled = true;
       if (chosen && btn.getAttribute('data-choice') === chosen) btn.classList.add('chosen');
     });
@@ -265,9 +269,10 @@
   function renderTurns(turns) {
     var container = $('#turns');
     container.innerHTML = '';
-    turns.forEach(function (turn) {
+    turns.forEach(function (turn, index) {
       var turnEl = document.createElement('section');
       turnEl.className = 'turn';
+      turnEl.setAttribute('data-turn', String(index));
 
       if (turn.prompt && turn.prompt.trim()) {
         var promptEl = document.createElement('div');
@@ -284,7 +289,7 @@
         cell.innerHTML =
           '<div class="cell-head">' +
             '<div class="avatar">' + side.toUpperCase() + '</div>' +
-            '<div class="cell-title" data-side="' + side + '">' + escapeHtml(modelLabel(state.models, side)) + '</div>' +
+            '<div class="cell-title" data-side="' + side + '">' + escapeHtml(side === 'a' ? '模型 A' : '模型 B') + '</div>' +
           '</div>';
         var body = document.createElement('div');
         body.className = 'cell-body md';
@@ -298,6 +303,26 @@
         answers.appendChild(cell);
       });
       turnEl.appendChild(answers);
+
+      // 每一轮各自独立投票：哪个回答更好？ + 4 个按钮
+      var vote = document.createElement('div');
+      vote.className = 'turn-vote';
+      vote.innerHTML =
+        '<h2>哪个回答更好？</h2>' +
+        '<div class="vote-buttons">' +
+          '<button class="vote-btn" data-choice="a">A 更好</button>' +
+          '<button class="vote-btn" data-choice="b">B 更好</button>' +
+          '<button class="vote-btn" data-choice="tie">平局</button>' +
+          '<button class="vote-btn" data-choice="bad">两个都差</button>' +
+        '</div>';
+      $$('.vote-btn', vote).forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          if (isTurnVoted(index)) return;
+          castVote(index, btn.getAttribute('data-choice'));
+        });
+      });
+      turnEl.appendChild(vote);
+
       container.appendChild(turnEl);
     });
   }
@@ -311,7 +336,11 @@
 
   function showShare(data) {
     state.models = data.models || null;
-    state.voted = Boolean(data.voted);
+    state.votedTurns = Array.isArray(data.voted_turns) ? data.voted_turns.slice() : [];
+    // 兼容旧版整场投票 cookie：data.voted === true 但没有 per-turn 信息时，所有轮次视为已投
+    if (data.voted === true && state.votedTurns.length === 0 && Array.isArray(data.turns)) {
+      state.votedTurns = data.turns.map(function (_, i) { return i; });
+    }
 
     $('#loading').hidden = true;
     $('#error-box').hidden = true;
@@ -320,40 +349,34 @@
     if (data.title) document.title = data.title;
 
     renderTurns(data.turns || []);
-    applyHeaders();
+    applyAllHeaders();
 
-    if (state.voted) disableVoteButtons(null);
+    state.votedTurns.forEach(function (i) { disableTurnButtons(i, null); });
   }
 
-  async function castVote(choice) {
-    $$('button.vote-btn').forEach(function (b) { b.disabled = true; });
+  async function castVote(turnIndex, choice) {
+    var buttons = $$('.turn[data-turn="' + turnIndex + '"] button.vote-btn');
+    buttons.forEach(function (b) { b.disabled = true; });
     try {
       var resp = await fetch('/api/vote/' + encodeURIComponent(SHARE_ID), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ choice: choice }),
+        body: JSON.stringify({ choice: choice, turn: turnIndex }),
       });
       var data = await resp.json().catch(function () { return {}; });
       if (!resp.ok) {
         throw new Error((data && data.message) || ('投票失败（HTTP ' + resp.status + '）'));
       }
-      state.voted = true;
+      if (state.votedTurns.indexOf(turnIndex) === -1) state.votedTurns.push(turnIndex);
       state.models = data.models || state.models;
-      applyHeaders();
-      disableVoteButtons(choice);
+      applyHeaders(turnIndex);
+      disableTurnButtons(turnIndex, choice);
     } catch (err) {
       console.error(err);
       alert(err.message || '投票失败，请稍后重试。');
-      $$('button.vote-btn').forEach(function (b) { b.disabled = false; });
+      buttons.forEach(function (b) { b.disabled = false; });
     }
   }
-
-  $$('button.vote-btn').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      if (state.voted) return;
-      castVote(btn.getAttribute('data-choice'));
-    });
-  });
 
   (async function load() {
     if (!SHARE_ID) { showError('链接中缺少分享 ID。'); return; }

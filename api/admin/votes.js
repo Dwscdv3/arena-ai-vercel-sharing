@@ -1,18 +1,12 @@
 'use strict';
 
 const { kv } = require('../_kv');
-const { sendJson, isAuthorized, baseUrl, handleKvUnavailable } = require('../_kit');
+const { sendJson, isAuthorized, baseUrl, handleKvUnavailable, parseVotesDoc, EMPTY_TALLIES } = require('../_kit');
 
-function normalizeTallies(rawVotes) {
-  let votes = {};
-  if (rawVotes) {
-    try { votes = JSON.parse(rawVotes); } catch { votes = {}; }
-  }
-  const a = Number(votes.a) || 0;
-  const b = Number(votes.b) || 0;
-  const tie = Number(votes.tie) || 0;
-  const bad = Number(votes.bad) || 0;
-  return { a, b, tie, bad, total: a + b + tie + bad };
+function snippet(text, max) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  if (clean.length <= max) return clean;
+  return clean.slice(0, max) + '…';
 }
 
 module.exports = async function handler(req, res) {
@@ -48,6 +42,16 @@ module.exports = async function handler(req, res) {
             kv(['GET', `votes:${entry.id}`]),
           ]);
           const share = rawShare ? JSON.parse(rawShare) : null;
+          const turnCount = share && Array.isArray(share.turns) ? share.turns.length : 0;
+          const { overall, turns: perTurn } = parseVotesDoc(rawVotes);
+          const turns = [];
+          for (let i = 0; i < turnCount; i += 1) {
+            turns.push({
+              index: i,
+              prompt: snippet(share.turns[i] && share.turns[i].prompt, 80),
+              tallies: { ...(perTurn[String(i)] || EMPTY_TALLIES) },
+            });
+          }
           return {
             id: entry.id,
             url: `${base}/share.html?id=${entry.id}`,
@@ -55,7 +59,9 @@ module.exports = async function handler(req, res) {
             created_at: entry.created_at || (share && share.created_at) || null,
             models: share ? share.models : null,
             source_url: share ? share.source_url : null,
-            tallies: normalizeTallies(rawVotes),
+            turn_count: turnCount,
+            tallies: overall,
+            turns,
           };
         } catch (err) {
           console.error(`Failed to load share ${entry.id}:`, err);
@@ -66,7 +72,9 @@ module.exports = async function handler(req, res) {
             created_at: entry.created_at || null,
             models: null,
             source_url: null,
-            tallies: normalizeTallies(null),
+            turn_count: 0,
+            tallies: { ...EMPTY_TALLIES },
+            turns: [],
             error: 'LOAD_FAILED',
           };
         }

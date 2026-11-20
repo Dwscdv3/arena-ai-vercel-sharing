@@ -1,7 +1,17 @@
 'use strict';
 
 const { kv } = require('../_kv');
-const { sendJson, readJsonBody, parseCookies, getShareId, handleKvUnavailable } = require('../_kit');
+const {
+  sendJson,
+  readJsonBody,
+  parseCookies,
+  getShareId,
+  handleKvUnavailable,
+  parseVotesDoc,
+  serializeVotesDoc,
+  bumpTally,
+  EMPTY_TALLIES,
+} = require('../_kit');
 
 const CHOICES = new Set(['a', 'b', 'tie', 'bad']);
 
@@ -34,6 +44,12 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  const turn = body && (typeof body.turn === 'number' ? body.turn : Number(body.turn));
+  if (!Number.isInteger(turn) || turn < 0) {
+    sendJson(res, 400, { error: 'INVALID_TURN', message: 'turn 必须是 >= 0 的整数（对应第几轮对话，从 0 开始）。' });
+    return;
+  }
+
   // 分享必须存在才接受投票
   let share;
   try {
@@ -50,23 +66,30 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  // 防止同一浏览器重复计票：已投过则直接返回当前结果
-  const cookies = parseCookies(req);
-  const alreadyVoted = cookies[`voted_${id}`] === '1';
+  const turnCount = Array.isArray(share.turns) ? share.turns.length : 0;
+  if (turn >= turnCount) {
+    sendJson(res, 400, { error: 'INVALID_TURN', message: `turn 超出范围：本分享共 ${turnCount} 轮（0 ~ ${turnCount - 1}）。` });
+    return;
+  }
 
-  let tallies;
+  // 同一浏览器对每一轮分别去重；旧版 voted_<id> cookie 视为所有轮次都已投过
+  const cookies = parseCookies(req);
+  const legacyVoted = cookies[`voted_${id}`] === '1';
+  const turnVoted = cookies[`voted_${id}_${turn}`] === '1';
+  const alreadyVoted = legacyVoted || turnVoted;
+
+  let turnTallies;
   try {
     const rawVotes = await kv(['GET', `votes:${id}`]);
-    const votes = rawVotes ? JSON.parse(rawVotes) : { a: 0, b: 0, tie: 0, bad: 0 };
+    const { overall, turns } = parseVotesDoc(rawVotes);
+    let nextOverall = overall;
+    let nextTurns = turns;
     if (!alreadyVoted) {
-      votes[choice] = (Number(votes[choice]) || 0) + 1;
-      await kv(['SET', `votes:${id}`, JSON.stringify(votes)]);
+      nextOverall = bumpTally(overall, choice);
+      nextTurns = { ...turns, [String(turn)]: bumpTally(turns[String(turn)] || EMPTY_TALLIES, choice) };
+      await kv(['SET', `votes:${id}`, serializeVotesDoc(nextOverall, nextTurns)]);
     }
-    const a = Number(votes.a) || 0;
-    const b = Number(votes.b) || 0;
-    const tie = Number(votes.tie) || 0;
-    const bad = Number(votes.bad) || 0;
-    tallies = { a, b, tie, bad, total: a + b + tie + bad };
+    turnTallies = { ...(nextTurns[String(turn)] || EMPTY_TALLIES) };
   } catch (err) {
     if (handleKvUnavailable(res, err)) return;
     console.error('Failed to record vote:', err);
@@ -75,7 +98,7 @@ module.exports = async function handler(req, res) {
   }
 
   const cookie = [
-    `voted_${id}=1`,
+    `voted_${id}_${turn}=1`,
     'Path=/',
     'HttpOnly',
     'Secure',
@@ -85,10 +108,11 @@ module.exports = async function handler(req, res) {
 
   sendJson(res, 200, {
     id,
+    turn,
     voted: true,
     already_voted: alreadyVoted,
     choice: alreadyVoted ? null : choice,
     models: share.models,
-    tallies,
+    tallies: turnTallies,
   }, { 'Set-Cookie': cookie });
 };
