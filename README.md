@@ -71,7 +71,7 @@ GET /api/admin/votes  ← Bearer <SHARE_TOKEN>，/admin.html 页面渲染统计
 1. 在 arena.ai 打一场 battle，回答生成完毕后点右下角「分享对话」。
 2. 检查抓取结果（抓取优先以复制按钮为锚点定位每条消息；arena.ai 的 DOM 会变化，抓不准就手动编辑 JSON；模型名可删掉保持匿名）。
 3. 点「生成分享链接」，把 `/share.html?id=<uuid>` 链接发出去。
-   - v1.6.0 起脚本抓取**清洗后的语义 HTML**（`innerHTML` 去掉 style/class/id、脚本/样式块、复制/点赞等按钮，仅保留 p/ul/ol/li/pre/code/table/h* 等语义标签，`a[href]`、`img[src|alt]` 保留），Markdown 渲染出的粗体、列表、代码块、表格都能原样展示；旧分享仍按 Markdown 渲染。
+   - v1.6.0 起脚本抓取**清洗后的语义 HTML**（`innerHTML` 去掉 style/class/id、脚本/样式块、复制/点赞等按钮，仅保留 p/ul/ol/li/pre/code/table/h* 等语义标签，`a[href]`、`img[src|alt]` 保留），Markdown 渲染出的粗体、列表、代码块、表格都能原样展示；旧分享仍按 Markdown 渲染。渲染时会**补齐 HTML 中遗漏的 Markdown**（`**粗体**`、`*斜体*`、`~~删除线~~`、`` `行内代码` ``、`[链接](url)`，`pre/code` 内不处理），标题元素按普通网页的字号层级和间距显示；提示词带的 HTML 只用于分享页渲染，标签页标题与 `/admin.html` 中的标题/提示词一律以纯文本显示（剥标签 + 还原转义实体）。
 4. 访客对每一轮分别投票后，才能看到对应轮的模型名；你自己在 `/admin.html` 输入 SHARE_TOKEN 查看每条分享的分轮次 A/B/平局/都差票数与整场合计。
 
 ## API

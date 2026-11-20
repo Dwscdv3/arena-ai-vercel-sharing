@@ -113,11 +113,15 @@
   .md p:last-child { margin-bottom: 0; }
   .md ul, .md ol { padding-left: 1.5em; margin: 0 0 10px; }
   .md li { margin: 2px 0; }
-  .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 {
-    font-size: 1em; font-weight: 700; margin: 14px 0 8px; line-height: 1.4;
-  }
-  .md h1 { font-size: 1.15em; }
-  .md h2 { font-size: 1.08em; }
+  /* 标题：与普通网页一致的字号层级和间距（h1 最大 … h6 最小） */
+  .md h1 { font-size: 1.75em; font-weight: 800; line-height: 1.35; margin: 0.9em 0 0.45em; }
+  .md h2 { font-size: 1.4em; font-weight: 700; line-height: 1.4; margin: 0.9em 0 0.45em; }
+  .md h3 { font-size: 1.18em; font-weight: 700; line-height: 1.45; margin: 0.85em 0 0.4em; }
+  .md h4 { font-size: 1.02em; font-weight: 700; line-height: 1.5; margin: 0.8em 0 0.4em; }
+  .md h5 { font-size: 0.9em; font-weight: 700; line-height: 1.5; margin: 0.8em 0 0.4em; }
+  .md h6 { font-size: 0.83em; font-weight: 600; line-height: 1.5; margin: 0.8em 0 0.4em; color: var(--muted); }
+  .md > :first-child { margin-top: 0; }
+  .md > :last-child { margin-bottom: 0; }
   .md code {
     background: var(--pre-bg);
     border: 1px solid var(--border);
@@ -146,7 +150,7 @@
   .md th, .md td { border: 1px solid var(--border); padding: 6px 10px; }
   .md th { background: var(--prompt-bg); }
   .md a { color: var(--fg); text-decoration: underline; text-underline-offset: 2px; }
-  .md hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+  .md hr { border: none; border-top: 1px solid var(--border); margin: 1.4em 0; height: 0; }
   .md img { max-width: 100%; }
 
   /* ---------- 每轮投票区（仅标题 + 4 个按钮） ---------- */
@@ -232,7 +236,75 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
+  // 还原 HTML 转义实体（named + numeric）；不会执行脚本
+  function decodeEntities(text) {
+    var el = document.createElement('textarea');
+    el.innerHTML = String(text == null ? '' : text);
+    return el.value;
+  }
+
+  // 纯文本化：剥掉标签、还原实体、压缩空白——用于标题等任何非渲染场合
+  function plainText(text) {
+    var stripped = String(text == null ? '' : text)
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return decodeEntities(stripped).replace(/\s+/g, ' ').trim();
+  }
+
   var HTML_TAG_RE = /<(?:p|div|ul|ol|li|pre|code|table|thead|tbody|tr|th|td|h[1-6]|blockquote|hr|img|a|strong|em|br|dl|dt|dd|figure|kbd|del|mark|sub|sup)\b[^>]*>/i;
+
+  // ---------- 补齐 HTML 里遗漏的 Markdown ----------
+  // 模型回答里没被 Markdown 渲染器处理掉的 **粗体** / *斜体* / ~~删除线~~ / `代码` / [链接](url)，
+  // 在这里补成对应标签。pre/code 块内、标签属性内一律不动；整体仍会过 DOMPurify。
+  function escapeHtmlText(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function mdInline(text) {
+    var s = String(text);
+    var codeStash = [];
+    // 1) 先摘出 `行内代码`，占位保护住它不被后面的规则改写
+    s = s.replace(/`([^`\n]+)`/g, function (m, code) {
+      codeStash.push(code);
+      return '\u0000C' + (codeStash.length - 1) + '\u0000';
+    });
+    // 2) 链接 [文本](http://…)（仅 http/https 与站内路径）
+    s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+|\/[^)\s]*)\)/g, function (m, label, url) {
+      return '<a href="' + url.replace(/"/g, '%22') + '" target="_blank" rel="noopener noreferrer">' + label + '</a>';
+    });
+    // 3) 粗体 **x**（允许夹在单词中间，符合 CommonMark）；__x__（两侧不能都是单词字符）
+    s = s.replace(/\*\*(?=\S)([\s\S]*?\S)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[^0-9A-Za-z_])__(?=\S)([\s\S]*?\S)__(?![0-9A-Za-z_])/g, '$1<strong>$2</strong>');
+    // 4) 斜体 *x*；_x_（_ 两侧不能都是单词字符，避免 snake_case 误伤）
+    s = s.replace(/\*(?=\S)([^*\n]*?\S)\*/g, '<em>$1</em>');
+    s = s.replace(/(^|[^0-9A-Za-z_])_(?=\S)([^_\n]*?\S)_(?![0-9A-Za-z_])/g, '$1<em>$2</em>');
+    // 5) 删除线 ~~x~~
+    s = s.replace(/~~(?=\S)([\s\S]*?\S)~~/g, '<del>$1</del>');
+    // 6) 还原行内代码（内容按纯文本转义）
+    s = s.replace(/\u0000C(\d+)\u0000/g, function (m, i) {
+      return '<code>' + escapeHtmlText(codeStash[Number(i)]) + '</code>';
+    });
+    return s;
+  }
+
+  function fixMissedMarkdown(html) {
+    var blockStash = [];
+    // pre/code 块原样保留，内部不做任何替换
+    var out = String(html).replace(/<(pre|code)\b[^>]*>[\s\S]*?<\/\1>/gi, function (m) {
+      blockStash.push(m);
+      return '\u0000B' + (blockStash.length - 1) + '\u0000';
+    });
+    // 其余部分按「标签 / 文本」交替切分——只处理文本，标签属性里的 ** 不动
+    out = out.split(/(<[^>]+>)/g).map(function (part, idx) {
+      if (idx % 2 === 1) return part;                 // 标签本体
+      if (/^\u0000B\d+\u0000$/.test(part)) return part; // 整体即 stash 占位
+      return mdInline(part);
+    }).join('');
+    return out.replace(/\u0000B(\d+)\u0000/g, function (m, i) { return blockStash[Number(i)]; });
+  }
 
   // v1.6.0 起 userscript 抓的是「清洗后的语义 HTML」；旧分享存的是 Markdown 文本——两者都能渲染
   var purifyHooked = false;
@@ -250,7 +322,7 @@
           purifyHooked = true;
         }
         if (HTML_TAG_RE.test(raw)) {
-          target.innerHTML = window.DOMPurify.sanitize(raw, { USE_PROFILES: { html: true } });
+          target.innerHTML = window.DOMPurify.sanitize(fixMissedMarkdown(raw), { USE_PROFILES: { html: true } });
         } else if (window.marked) {
           target.innerHTML = window.DOMPurify.sanitize(window.marked.parse(raw, { breaks: true, gfm: true }), { USE_PROFILES: { html: true } });
         } else {
@@ -413,7 +485,11 @@
     $('#error-box').hidden = true;
     $('#content').hidden = false;
 
-    if (data.title) document.title = data.title;
+    // 标题来自提示词（可能带 HTML）：纯文本化后再用作标签页标题
+    if (data.title) {
+      var plainTitle = plainText(data.title);
+      if (plainTitle) document.title = plainTitle;
+    }
 
     renderTurns(data.turns || []);
     applyAllHeaders();
