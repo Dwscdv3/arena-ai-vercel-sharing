@@ -1,0 +1,9 @@
+{
+  "name": "arena-blind-share",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Share arena.ai (LMArena) conversations behind anonymized, vote-to-reveal links.",
+  "scripts": {
+    "dev": "vercel dev"
+  }
+}

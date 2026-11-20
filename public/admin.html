@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>管理员 · Arena Blind Share</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" href="/favicon.svg">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    min-height: 100vh;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: #0f1117;
+    color: #e2e8f0;
+    padding: 32px 20px 64px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; letter-spacing: -0.01em; }
+  p.sub { color: #94a3b8; font-size: 0.88rem; margin-top: 6px; }
+  .auth { display: flex; gap: 10px; margin: 22px 0; flex-wrap: wrap; }
+  input[type=password] {
+    flex: 1; min-width: 240px; background: #1e293b; border: 1px solid rgba(148,163,184,.25); color: #e2e8f0;
+    border-radius: 10px; padding: 11px 14px; font-size: 0.92rem; font-family: inherit; outline: none;
+  }
+  input[type=password]:focus { border-color: #7dd3fc; }
+  button {
+    cursor: pointer; border: none; border-radius: 10px; padding: 11px 20px; font-size: 0.9rem; font-weight: 600;
+    background: #e2e8f0; color: #0f1117; font-family: inherit;
+  }
+  button.secondary { background: transparent; color: #cbd5e1; border: 1px solid rgba(148,163,184,.35); }
+  .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 20px 0; }
+  @media (max-width: 720px) { .cards { grid-template-columns: repeat(2, 1fr); } }
+  .stat { background: rgba(30,41,59,.45); border: 1px solid rgba(148,163,184,.12); border-radius: 12px; padding: 14px 16px; }
+  .stat .n { font-size: 1.5rem; font-weight: 800; }
+  .stat .l { font-size: 0.75rem; color: #94a3b8; margin-top: 2px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid rgba(148,163,184,.12); }
+  th { color: #94a3b8; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; }
+  td a { color: #7dd3fc; text-decoration: none; }
+  td a:hover { text-decoration: underline; }
+  .title-cell { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .models { font-size: 0.78rem; color: #cbd5e1; }
+  .msg { margin: 14px 0; font-size: 0.88rem; }
+  .msg.err { color: #fca5a5; }
+  .msg.ok { color: #6ee7b7; }
+  .table-wrap { overflow-x: auto; border: 1px solid rgba(148,163,184,.12); border-radius: 12px; }
+  .empty { color: #64748b; text-align: center; padding: 40px 0; }
+  .gen { color: #475569; font-size: 0.75rem; margin-top: 14px; }
+  .back { color: #64748b; font-size: 0.82rem; text-decoration: none; display: inline-block; margin-bottom: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="/">← 返回首页</a>
+  <h1>管理员 · 投票结果</h1>
+  <p class="sub">使用创建分享链接时使用的 SHARE_TOKEN 登录。token 只保存在当前标签页的 sessionStorage 中，不会被发送到除本站以外的任何地方。</p>
+
+  <form class="auth" id="auth-form">
+    <input type="password" id="token-input" placeholder="SHARE_TOKEN" autocomplete="off" required>
+    <button type="submit">查看统计</button>
+    <button type="button" class="secondary" id="clear-token">清除 token</button>
+  </form>
+
+  <p class="msg" id="message" hidden></p>
+
+  <div class="cards" id="summary-cards" hidden>
+    <div class="stat"><div class="n" id="stat-shares">0</div><div class="l">分享链接数</div></div>
+    <div class="stat"><div class="n" id="stat-total">0</div><div class="l">总票数</div></div>
+    <div class="stat"><div class="n" id="stat-a">0</div><div class="l">A 更好</div></div>
+    <div class="stat"><div class="n" id="stat-b">0</div><div class="l">B 更好</div></div>
+  </div>
+
+  <div class="table-wrap" id="table-wrap" hidden>
+    <table>
+      <thead>
+        <tr><th>创建时间</th><th>对话</th><th>模型</th><th>A</th><th>B</th><th>平局</th><th>都差</th><th>合计</th></tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <p class="empty" id="empty" hidden>还没有任何分享链接。</p>
+  <p class="gen" id="generated-at"></p>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (sel) { return document.querySelector(sel); };
+  var sessionKey = 'arena_blind_share_admin_token';
+
+  function showMessage(text, kind) {
+    var el = $('#message');
+    el.textContent = text;
+    el.className = 'msg ' + (kind || '');
+    el.hidden = !text;
+  }
+
+  function escapeHtml(text) {
+    return String(text == null ? '' : text)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function formatDate(iso) {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'short' }); }
+    catch (_) { return iso; }
+  }
+
+  function render(data) {
+    var totals = data.totals || { a: 0, b: 0, tie: 0, bad: 0, total: 0 };
+    $('#stat-shares').textContent = data.share_count || 0;
+    $('#stat-total').textContent = totals.total;
+    $('#stat-a').textContent = totals.a;
+    $('#stat-b').textContent = totals.b;
+    $('#summary-cards').hidden = false;
+
+    var tbody = $('#rows');
+    var shares = data.shares || [];
+    if (!shares.length) {
+      $('#table-wrap').hidden = true;
+      $('#empty').hidden = false;
+    } else {
+      $('#empty').hidden = true;
+      $('#table-wrap').hidden = false;
+      tbody.innerHTML = shares.map(function (s) {
+        var models = s.models ? ('A: ' + s.models.a + '\nB: ' + s.models.b) : '（未揭晓）';
+        return (
+          '<tr>' +
+            '<td>' + escapeHtml(formatDate(s.created_at)) + '</td>' +
+            '<td class="title-cell"><a href="' + escapeHtml(s.url) + '" target="_blank" rel="noopener noreferrer" title="' + escapeHtml(s.title) + '">' + escapeHtml(s.title || s.id) + '</a></td>' +
+            '<td class="models">' + escapeHtml(models).replace(/\n/g, '<br>') + '</td>' +
+            '<td>' + s.tallies.a + '</td>' +
+            '<td>' + s.tallies.b + '</td>' +
+            '<td>' + s.tallies.tie + '</td>' +
+            '<td>' + s.tallies.bad + '</td>' +
+            '<td>' + s.tallies.total + '</td>' +
+          '</tr>'
+        );
+      }).join('');
+    }
+    $('#generated-at').textContent = '数据生成时间：' + (data.generated_at || '');
+  }
+
+  async function loadReport(token) {
+    showMessage('正在加载…', 'ok');
+    var resp = await fetch('/api/admin/votes', {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' },
+    });
+    var data = await resp.json().catch(function () { return {}; });
+    if (!resp.ok) {
+      showMessage((data && data.message) || ('加载失败（HTTP ' + resp.status + '）'), 'err');
+      return false;
+    }
+    showMessage('', '');
+    render(data);
+    return true;
+  }
+
+  $('#auth-form').addEventListener('submit', async function (event) {
+    event.preventDefault();
+    var token = $('#token-input').value.trim();
+    if (!token) return;
+    var ok = await loadReport(token);
+    if (ok) sessionStorage.setItem(sessionKey, token);
+  });
+
+  $('#clear-token').addEventListener('click', function () {
+    sessionStorage.removeItem(sessionKey);
+    $('#token-input').value = '';
+    showMessage('已清除本标签页保存的 token。', 'ok');
+  });
+
+  var saved = sessionStorage.getItem(sessionKey);
+  if (saved) {
+    $('#token-input').value = saved;
+    loadReport(saved);
+  }
+})();
+</script>
+</body>
+</html>
