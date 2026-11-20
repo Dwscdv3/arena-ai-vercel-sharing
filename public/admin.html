@@ -7,55 +7,81 @@
 <meta name="robots" content="noindex, nofollow">
 <link rel="icon" href="/favicon.svg">
 <style>
-  :root { color-scheme: dark; }
+  :root {
+    color-scheme: light;
+    --bg: #ffffff;
+    --fg: #111111;
+    --muted: #6b6b6b;
+    --border: #e4e4e4;
+    --card: #f7f7f7;
+    --input-bg: #ffffff;
+    --pre-bg: #f5f5f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: #0a0a0a;
+      --fg: #f5f5f5;
+      --muted: #a3a3a3;
+      --border: #262626;
+      --card: #141414;
+      --input-bg: #161616;
+      --pre-bg: #111111;
+    }
+  }
   * { box-sizing: border-box; margin: 0; }
   body {
     min-height: 100vh;
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-    background: #0f1117;
-    color: #e2e8f0;
+    background: var(--bg);
+    color: var(--fg);
     padding: 32px 20px 64px;
   }
   .wrap { max-width: 1080px; margin: 0 auto; }
   h1 { font-size: 1.4rem; letter-spacing: -0.01em; }
-  p.sub { color: #94a3b8; font-size: 0.88rem; margin-top: 6px; }
+  p.sub { color: var(--muted); font-size: 0.88rem; margin-top: 6px; line-height: 1.6; }
   .auth { display: flex; gap: 10px; margin: 22px 0; flex-wrap: wrap; }
   input[type=password] {
-    flex: 1; min-width: 240px; background: #1e293b; border: 1px solid rgba(148,163,184,.25); color: #e2e8f0;
+    flex: 1; min-width: 240px; background: var(--input-bg); border: 1px solid var(--border); color: var(--fg);
     border-radius: 10px; padding: 11px 14px; font-size: 0.92rem; font-family: inherit; outline: none;
   }
-  input[type=password]:focus { border-color: #7dd3fc; }
+  input[type=password]:focus { border-color: var(--fg); }
   button {
     cursor: pointer; border: none; border-radius: 10px; padding: 11px 20px; font-size: 0.9rem; font-weight: 600;
-    background: #e2e8f0; color: #0f1117; font-family: inherit;
+    background: var(--fg); color: var(--bg); font-family: inherit;
   }
-  button.secondary { background: transparent; color: #cbd5e1; border: 1px solid rgba(148,163,184,.35); }
+  button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--border); }
   .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 20px 0; }
   @media (max-width: 720px) { .cards { grid-template-columns: repeat(2, 1fr); } }
-  .stat { background: rgba(30,41,59,.45); border: 1px solid rgba(148,163,184,.12); border-radius: 12px; padding: 14px 16px; }
+  .stat { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
   .stat .n { font-size: 1.5rem; font-weight: 800; }
-  .stat .l { font-size: 0.75rem; color: #94a3b8; margin-top: 2px; }
-  table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
-  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid rgba(148,163,184,.12); }
-  th { color: #94a3b8; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; }
-  td a { color: #7dd3fc; text-decoration: none; }
-  td a:hover { text-decoration: underline; }
-  .title-cell { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .models { font-size: 0.78rem; color: #cbd5e1; }
+  .stat .l { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
   .msg { margin: 14px 0; font-size: 0.88rem; }
-  .msg.err { color: #fca5a5; }
-  .msg.ok { color: #6ee7b7; }
-  .table-wrap { overflow-x: auto; border: 1px solid rgba(148,163,184,.12); border-radius: 12px; }
-  .empty { color: #64748b; text-align: center; padding: 40px 0; }
-  .gen { color: #475569; font-size: 0.75rem; margin-top: 14px; }
-  .back { color: #64748b; font-size: 0.82rem; text-decoration: none; display: inline-block; margin-bottom: 16px; }
+  .msg.err { color: #e11d48; }
+  @media (prefers-color-scheme: dark) { .msg.err { color: #fca5a5; } }
+  .msg.ok { color: var(--muted); }
+  .empty { color: var(--muted); text-align: center; padding: 40px 0; }
+  .gen { color: var(--muted); font-size: 0.75rem; margin-top: 14px; }
+  .back { color: var(--muted); font-size: 0.82rem; text-decoration: none; display: inline-block; margin-bottom: 16px; }
+
+  .share { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; margin-bottom: 14px; }
+  .share-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  .share-head a.title { color: var(--fg); font-weight: 700; text-decoration: none; max-width: 480px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .share-head a.title:hover { text-decoration: underline; }
+  .share-head .date { color: var(--muted); font-size: 0.78rem; }
+  .share-head .models { color: var(--muted); font-size: 0.78rem; }
+  .share-head .overall { margin-left: auto; font-size: 0.82rem; color: var(--fg); font-variant-numeric: tabular-nums; }
+  .turn-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; font-variant-numeric: tabular-nums; }
+  .turn-table th, .turn-table td { text-align: left; padding: 7px 10px; border-top: 1px solid var(--border); }
+  .turn-table th { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; }
+  .turn-table td.prompt-cell { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 </style>
 </head>
 <body>
 <div class="wrap">
   <a class="back" href="/">← 返回首页</a>
   <h1>管理员 · 投票结果</h1>
-  <p class="sub">使用创建分享链接时使用的 SHARE_TOKEN 登录。token 只保存在当前标签页的 sessionStorage 中，不会被发送到除本站以外的任何地方。</p>
+  <p class="sub">使用创建分享链接时使用的 SHARE_TOKEN 登录。token 只保存在当前标签页的 sessionStorage 中。每个分享会展示<strong>每一轮对话</strong>的投票明细（A 更好 / B 更好 / 平局 / 两个都差），以及整场合计（含历史数据）。</p>
 
   <form class="auth" id="auth-form">
     <input type="password" id="token-input" placeholder="SHARE_TOKEN" autocomplete="off" required>
@@ -72,14 +98,7 @@
     <div class="stat"><div class="n" id="stat-b">0</div><div class="l">B 更好</div></div>
   </div>
 
-  <div class="table-wrap" id="table-wrap" hidden>
-    <table>
-      <thead>
-        <tr><th>创建时间</th><th>对话</th><th>模型</th><th>A</th><th>B</th><th>平局</th><th>都差</th><th>合计</th></tr>
-      </thead>
-      <tbody id="rows"></tbody>
-    </table>
-  </div>
+  <div id="share-list"></div>
   <p class="empty" id="empty" hidden>还没有任何分享链接。</p>
   <p class="gen" id="generated-at"></p>
 </div>
@@ -109,6 +128,47 @@
     catch (_) { return iso; }
   }
 
+  function overallLine(t) {
+    return 'A ' + t.a + ' · B ' + t.b + ' · 平局 ' + t.tie + ' · 都差 ' + t.bad + ' · 合计 ' + t.total;
+  }
+
+  function renderTurnRows(turns) {
+    if (!turns || !turns.length) {
+      return '<tr><td colspan="7" style="color:var(--muted)">（无轮次数据）</td></tr>';
+    }
+    return turns.map(function (t) {
+      return (
+        '<tr>' +
+          '<td>第 ' + (t.index + 1) + ' 轮</td>' +
+          '<td class="prompt-cell" title="' + escapeHtml(t.prompt) + '">' + escapeHtml(t.prompt || '（无提示词）') + '</td>' +
+          '<td>' + t.tallies.a + '</td>' +
+          '<td>' + t.tallies.b + '</td>' +
+          '<td>' + t.tallies.tie + '</td>' +
+          '<td>' + t.tallies.bad + '</td>' +
+          '<td>' + t.tallies.total + '</td>' +
+        '</tr>'
+      );
+    }).join('');
+  }
+
+  function renderShare(s) {
+    var models = s.models ? ('模型：A = ' + s.models.a + '，B = ' + s.models.b) : '模型：未揭晓';
+    return (
+      '<section class="share">' +
+        '<div class="share-head">' +
+          '<a class="title" href="' + escapeHtml(s.url) + '" target="_blank" rel="noopener noreferrer" title="' + escapeHtml(s.title) + '">' + escapeHtml(s.title || s.id) + '</a>' +
+          '<span class="date">' + escapeHtml(formatDate(s.created_at)) + '</span>' +
+          '<span class="models">' + escapeHtml(models) + '</span>' +
+          '<span class="overall">' + escapeHtml(overallLine(s.tallies)) + '</span>' +
+        '</div>' +
+        '<table class="turn-table">' +
+          '<thead><tr><th>轮次</th><th>提示词</th><th>A 更好</th><th>B 更好</th><th>平局</th><th>都差</th><th>合计</th></tr></thead>' +
+          '<tbody>' + renderTurnRows(s.turns) + '</tbody>' +
+        '</table>' +
+      '</section>'
+    );
+  }
+
   function render(data) {
     var totals = data.totals || { a: 0, b: 0, tie: 0, bad: 0, total: 0 };
     $('#stat-shares').textContent = data.share_count || 0;
@@ -117,29 +177,13 @@
     $('#stat-b').textContent = totals.b;
     $('#summary-cards').hidden = false;
 
-    var tbody = $('#rows');
     var shares = data.shares || [];
     if (!shares.length) {
-      $('#table-wrap').hidden = true;
+      $('#share-list').innerHTML = '';
       $('#empty').hidden = false;
     } else {
       $('#empty').hidden = true;
-      $('#table-wrap').hidden = false;
-      tbody.innerHTML = shares.map(function (s) {
-        var models = s.models ? ('A: ' + s.models.a + '\nB: ' + s.models.b) : '（未揭晓）';
-        return (
-          '<tr>' +
-            '<td>' + escapeHtml(formatDate(s.created_at)) + '</td>' +
-            '<td class="title-cell"><a href="' + escapeHtml(s.url) + '" target="_blank" rel="noopener noreferrer" title="' + escapeHtml(s.title) + '">' + escapeHtml(s.title || s.id) + '</a></td>' +
-            '<td class="models">' + escapeHtml(models).replace(/\n/g, '<br>') + '</td>' +
-            '<td>' + s.tallies.a + '</td>' +
-            '<td>' + s.tallies.b + '</td>' +
-            '<td>' + s.tallies.tie + '</td>' +
-            '<td>' + s.tallies.bad + '</td>' +
-            '<td>' + s.tallies.total + '</td>' +
-          '</tr>'
-        );
-      }).join('');
+      $('#share-list').innerHTML = shares.map(renderShare).join('');
     }
     $('#generated-at').textContent = '数据生成时间：' + (data.generated_at || '');
   }

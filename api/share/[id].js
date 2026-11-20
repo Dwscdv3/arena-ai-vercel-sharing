@@ -1,24 +1,7 @@
 'use strict';
 
 const { kv } = require('../_kv');
-const { sendJson, parseCookies, getShareId, handleKvUnavailable } = require('../_kit');
-
-const EMPTY_TALLIES = { a: 0, b: 0, tie: 0, bad: 0, total: 0 };
-
-async function readTallies(id) {
-  const raw = await kv(['GET', `votes:${id}`]);
-  if (!raw) return { ...EMPTY_TALLIES };
-  try {
-    const parsed = JSON.parse(raw);
-    const a = Number(parsed.a) || 0;
-    const b = Number(parsed.b) || 0;
-    const tie = Number(parsed.tie) || 0;
-    const bad = Number(parsed.bad) || 0;
-    return { a, b, tie, bad, total: a + b + tie + bad };
-  } catch {
-    return { ...EMPTY_TALLIES };
-  }
-}
+const { sendJson, parseCookies, getShareId, handleKvUnavailable, parseVotesDoc, EMPTY_TALLIES } = require('../_kit');
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -48,15 +31,30 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  const turns = Array.isArray(share.turns) ? share.turns : [];
+
+  // 每轮分别去重；旧版 voted_<id> cookie 视为所有轮次都已投过
   const cookies = parseCookies(req);
-  const voted = cookies[`voted_${id}`] === '1';
+  const legacyVoted = cookies[`voted_${id}`] === '1';
+  const votedTurns = [];
+  for (let i = 0; i < turns.length; i += 1) {
+    if (legacyVoted || cookies[`voted_${id}_${i}`] === '1') votedTurns.push(i);
+  }
+  const anyVoted = votedTurns.length > 0;
 
   let tallies = null;
+  let turnTallies = null;
   try {
-    if (voted) tallies = await readTallies(id);
+    if (anyVoted) {
+      const rawVotes = await kv(['GET', `votes:${id}`]);
+      const { overall, turns: perTurn } = parseVotesDoc(rawVotes);
+      tallies = overall;
+      turnTallies = turns.map((_, i) => ({ ...(perTurn[String(i)] || EMPTY_TALLIES) }));
+    }
   } catch (err) {
     console.error('Failed to read tallies:', err);
     tallies = null;
+    turnTallies = null;
   }
 
   sendJson(res, 200, {
@@ -64,10 +62,13 @@ module.exports = async function handler(req, res) {
     created_at: share.created_at,
     title: share.title,
     source_url: share.source_url,
-    turns: share.turns,
-    // 投票前像 arena.ai 一样隐藏模型名称；投过票的浏览器才会返回真名和统计
-    models: voted ? share.models : null,
-    voted,
+    turns,
+    // 模型名是整场对话共用的：投过任意一轮后匿名才解除（投票前像 arena.ai 一样隐藏）；
+    // 每一轮在自己投票之前，界面上依然先显示“模型 A / 模型 B”
+    models: anyVoted ? share.models : null,
+    voted: legacyVoted,
+    voted_turns: votedTurns,
     tallies,
+    turn_tallies: turnTallies,
   });
 };

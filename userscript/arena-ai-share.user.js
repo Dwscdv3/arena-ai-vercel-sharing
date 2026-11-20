@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arena Blind Share
 // @namespace    https://github.com/Dwscdv3/arena-ai-vercel-sharing
-// @version      1.0.0
+// @version      1.1.0
 // @description  把当前 arena.ai 对战对话保存下来，生成「投票后才揭晓模型名」的匿名分享链接（由 Vercel 后端托管）
 // @author       Dwscdv3
 // @homepage     https://github.com/Dwscdv3/arena-ai-vercel-sharing
@@ -78,10 +78,10 @@
 
   function isUserNode(el) {
     if (!el.getAttribute) return false;
-    var role = (el.getAttribute('data-role') || el.getAttribute('data-author') || '').toLowerCase();
+    var role = (el.getAttribute('data-role') || el.getAttribute('data-author') || el.getAttribute('data-message-author-role') || '').toLowerCase();
     if (role === 'user' || role === 'human') return true;
     var cls = (el.className && el.className.toString ? el.className.toString() : '').toLowerCase();
-    if (/(^|\s|_|-)(user|human|question|prompt)(-|_|\s|$)/.test(cls)) return true;
+    if (/(^|\s|_|-)(user|human|question|prompt|user-message|usermessage|humanmessage)(-|_|\s|$)/.test(cls)) return true;
     var testid = (el.getAttribute('data-testid') || '').toLowerCase();
     if (/user|human|question|prompt/.test(testid)) return true;
     return false;
@@ -89,10 +89,10 @@
 
   function isAssistantNode(el) {
     if (isUserNode(el)) return false;
-    var role = ((el.getAttribute('data-role') || el.getAttribute('data-author') || '') + '').toLowerCase();
-    if (role === 'assistant' || role === 'model' || role === 'bot') return true;
+    var role = ((el.getAttribute('data-role') || el.getAttribute('data-author') || el.getAttribute('data-message-author-role') || '') + '').toLowerCase();
+    if (role === 'assistant' || role === 'model' || role === 'bot' || role === 'ai') return true;
     var cls = (el.className && el.className.toString ? el.className.toString() : '').toLowerCase();
-    if (/prose|markdown|assistant|model-response|answer/.test(cls)) return true;
+    if (/prose|markdown|assistant|assistant-message|assistantmessage|aimessage|model-response|answer/.test(cls)) return true;
     if (el.classList && el.classList.contains('prose')) return true;
     return false;
   }
@@ -127,7 +127,7 @@
 
   function extractConversation() {
     var raw = Array.prototype.slice.call(
-      document.querySelectorAll('.prose, [data-role], [data-author], [data-testid*="message" i], [class*="message" i], [class*="response" i]')
+      document.querySelectorAll('.prose, .markdown, .markdown-body, [data-role], [data-author], [data-testid*="message" i], [data-testid*="prompt" i], [data-testid*="response" i], [class*="message" i], [class*="response" i], [class*="user-message" i], [class*="assistant-message" i], [class*="userMessage"], [class*="assistantMessage"], [class*="HumanMessage"], [class*="AIMessage"]')
     ).filter(function (el) { return getText(el).length > 0; });
 
     var nodes = dedupeNested(raw)
@@ -236,7 +236,8 @@
     var apiBase = getApiBase();
     var tokenReady = Boolean(getToken());
     textarea.value = JSON.stringify(payload, null, 2);
-    meta.textContent = 'API：' + apiBase + (tokenReady ? ' · token 已设置' : ' · ⚠ 尚未设置 SHARE_TOKEN（菜单 → 设置 SHARE_TOKEN）');
+    var turnCount = payload && Array.isArray(payload.turns) ? payload.turns.length : 0;
+    meta.textContent = 'API：' + apiBase + ' · 共 ' + turnCount + ' 轮对话（含提示词）' + (tokenReady ? ' · token 已设置' : ' · ⚠ 尚未设置 SHARE_TOKEN（菜单 → 设置 SHARE_TOKEN）');
 
     overlay.querySelector('.abs-close').addEventListener('click', closeModal);
     overlay.addEventListener('click', function (e) { if (e.target === overlay) closeModal(); });
