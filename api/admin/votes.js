@@ -4,7 +4,13 @@ const { kv } = require('../_kv');
 const { sendJson, isAuthorized, baseUrl, handleKvUnavailable, parseVotesDoc, EMPTY_TALLIES } = require('../_kit');
 
 function snippet(text, max) {
-  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  const clean = String(text || '')
+    .replace(/<[^>]*>/g, ' ')          // 新版分享存的是 HTML：剥掉标签再显示
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
   if (clean.length <= max) return clean;
   return clean.slice(0, max) + '…';
 }

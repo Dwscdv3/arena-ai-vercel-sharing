@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | 油猴用户脚本 | `userscript/arena-ai-share.user.js` | 在 arena.ai 页面抓取当前对话（优先按每条消息旁的「复制」按钮定位消息容器，提示词与两侧回答都能抓到，通用选择器兜底），审核后 POST 给后端 |
 | 后端 API | `api/` | Vercel serverless functions，零依赖，直接调用 Upstash/Vercel KV REST API |
-| 分享页 | `public/share.html` | `share.html?id=<uuid>`，对话界面风格、黑白双主题（跟随 `prefers-color-scheme`）、无顶栏/无标题、Markdown 渲染；**每一轮对话下方各有独立投票区**（「哪个回答更好？」+ 4 个按钮），投完某一轮才在该轮回答栏头部揭晓模型名 |
+| 分享页 | `public/share.html` | `share.html?id=<uuid>`，对话界面风格、黑白双主题（跟随 `prefers-color-scheme`）、无顶栏/无标题、渲染 v1.6.0 起的语义 HTML（旧分享回退 Markdown）；**每一轮对话下方各有独立投票区**（「哪个回答更好？」+ 4 个按钮），投完某一轮才在该轮回答栏头部揭晓模型名 |
 | 管理页 | `public/admin.html` | `/admin.html`，token 登录后查看所有分享的投票统计，含**每一轮对话**的明细 |
 | 首页 | `public/index.html` | 项目说明 |
 
@@ -71,6 +71,7 @@ GET /api/admin/votes  ← Bearer <SHARE_TOKEN>，/admin.html 页面渲染统计
 1. 在 arena.ai 打一场 battle，回答生成完毕后点右下角「分享对话」。
 2. 检查抓取结果（抓取优先以复制按钮为锚点定位每条消息；arena.ai 的 DOM 会变化，抓不准就手动编辑 JSON；模型名可删掉保持匿名）。
 3. 点「生成分享链接」，把 `/share.html?id=<uuid>` 链接发出去。
+   - v1.6.0 起脚本抓取**清洗后的语义 HTML**（`innerHTML` 去掉 style/class/id、脚本/样式块、复制/点赞等按钮，仅保留 p/ul/ol/li/pre/code/table/h* 等语义标签，`a[href]`、`img[src|alt]` 保留），Markdown 渲染出的粗体、列表、代码块、表格都能原样展示；旧分享仍按 Markdown 渲染。
 4. 访客对每一轮分别投票后，才能看到对应轮的模型名；你自己在 `/admin.html` 输入 SHARE_TOKEN 查看每条分享的分轮次 A/B/平局/都差票数与整场合计。
 
 ## API
