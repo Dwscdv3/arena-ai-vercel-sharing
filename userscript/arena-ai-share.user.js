@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arena Blind Share
 // @namespace    https://github.com/Dwscdv3/arena-ai-vercel-sharing
-// @version      1.3.0
+// @version      1.4.0
 // @description  把当前 arena.ai 对战对话保存下来，生成「投票后才揭晓模型名」的匿名分享链接（由 Vercel 后端托管）
 // @author       Dwscdv3
 // @homepage     https://github.com/Dwscdv3/arena-ai-vercel-sharing
@@ -213,13 +213,14 @@
   function assembleTurns(items) {
     var turns = [];
     var current = null;
-    var seen = new Set();
+    var prevKey = '';
     items.forEach(function (item) {
       var text = item.text;
       if (!text) return;
-      var key = text.slice(0, 200);
-      if (seen.has(key)) return;
-      seen.add(key);
+      if (isModelIdLike(text)) return; // 模型 id 徽标（如 gemini-4-carbon-high）不是对话内容
+      var key = text.replace(/\s+/g, ' ').trim().slice(0, 200);
+      if (key && key === prevKey) return; // 仅折叠相邻重复（同一消息被多个选择器/两次渲染命中）；非相邻的重复提问保留
+      prevKey = key;
       var kind = item.kind;
       if (kind === 'unknown') {
         if (!current) {
@@ -259,7 +260,7 @@
       if (!container || seenEls.has(container)) return;
       seenEls.add(container);
       var text = messageText(container, btn);
-      if (!text) return;
+      if (!text || isModelIdLike(text)) return;
       items.push({ el: container, text: text, kind: classifyMessageBlock(container) });
     });
     items = items.filter(function (it) { return isVisibleEl(it.el); });
@@ -274,6 +275,7 @@
 
     var nodes = dedupeNested(raw)
       .filter(isVisibleEl)
+      .filter(function (el) { return !isModelIdLike(getText(el)); })
       .filter(function (el) { return isUserNode(el) || isAssistantNode(el); });
 
     nodes.sort(byDocOrder);
@@ -296,6 +298,46 @@
 
   var KNOWN_MODEL_RE = /(gpt[-\w.]*|o[134](?:-[\w.]+)*|claude[-\w.]*|gemini[-\w.]*|llama[-\w.]*|qwen[-\w.]*|grok[-\w.]*|deepseek[-\w.]*|mistral[-\w.]*|mixtral[-\w.]*|command[-\w.]*|nova[-\w.]*|glm[-\w.]*|yi[-\w.]*|phi[-\w.]*|kimi[-\w.]*|doubao[-\w.]*|ernie[-\w.]*|o1-preview|chatgpt)/i;
 
+  // arena.ai 在对战揭晓后展示模型 id 徽标（如 gemini-4-carbon-high）：单个 token、
+  // 含分隔符且命中已知模型名前缀的块不是对话内容，跳过
+  var MODEL_ID_TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9._\-\/]{1,63}$/;
+  function isModelIdLike(text) {
+    var t = (text || '').trim();
+    if (!t || t.length > 64 || /\s/.test(t)) return false;
+    if (!MODEL_ID_TOKEN_RE.test(t)) return false;
+    if (!/[-._]/.test(t)) return false;
+    return KNOWN_MODEL_RE.test(t);
+  }
+
+  function normText(t) { return (t || '').trim().replace(/\s+/g, ' ').toLowerCase(); }
+
+  function isEmptyTurn(t) {
+    return !(t.prompt && t.prompt.trim()) && !(t.responses.a && t.responses.a.trim()) && !(t.responses.b && t.responses.b.trim());
+  }
+
+  // 合并后清理：1) 完全相同的重复轮次只保留一份；2) 同一提示词若已有带回答的轮次，丢弃回答为空的「幽灵轮次」
+  function dedupeTurns(turns) {
+    var seen = new Set();
+    var out = [];
+    turns.forEach(function (t) {
+      var key = normText(t.prompt) + '||' + normText(t.responses.a) + '||' + normText(t.responses.b);
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(t);
+    });
+    var answered = {};
+    out.forEach(function (t) {
+      if (t.prompt && ((t.responses.a && t.responses.a.trim()) || (t.responses.b && t.responses.b.trim()))) {
+        answered[normText(t.prompt)] = 1;
+      }
+    });
+    return out.filter(function (t) {
+      var k = normText(t.prompt);
+      if (k && answered[k] && !(t.responses.a && t.responses.a.trim()) && !(t.responses.b && t.responses.b.trim())) return false;
+      return true;
+    });
+  }
+
   function detectModelNames() {
     var found = [];
     var candidates = document.querySelectorAll('[class*="model" i], [class*="Model"], [data-model], [data-testid*="model" i]');
@@ -313,25 +355,64 @@
   }
 
   function mergeTurns(viaButtons, viaGeneric) {
-    if (!viaButtons.length || !viaGeneric.length) {
-      return viaButtons.length ? viaButtons : viaGeneric;
-    }
-    // 两条路径都有结果时做对齐合并：通用路径优先提供提示词（若抓到），
-    // 复制按钮路径优先提供两侧回答（内容更完整、不含按钮文案）
-    var merged = [];
-    var n = Math.max(viaButtons.length, viaGeneric.length);
-    for (var i = 0; i < n; i += 1) {
-      var bt = viaButtons[i] || { prompt: '', responses: { a: '', b: '' } };
-      var gt = viaGeneric[i] || { prompt: '', responses: { a: '', b: '' } };
-      merged.push({
-        prompt: gt.prompt || bt.prompt,
-        responses: {
-          a: bt.responses.a || gt.responses.a,
-          b: bt.responses.b || gt.responses.b,
-        },
-      });
-    }
-    return merged;
+    var A = (viaButtons || []).filter(function (t) { return !isEmptyTurn(t) && !isModelIdLike(t.prompt); });
+    var B = (viaGeneric || []).filter(function (t) { return !isEmptyTurn(t) && !isModelIdLike(t.prompt); });
+    if (!A.length) return dedupeTurns(B);
+    if (!B.length) return dedupeTurns(A);
+    var merged = A.map(function (t) {
+      return { prompt: t.prompt || '', responses: { a: t.responses.a || '', b: t.responses.b || '' } };
+    });
+    var usedB = {};
+    //  pass 1：按提示词对齐（通用路径补回答 / 表达完整度更高的一侧）
+    merged.forEach(function (t) {
+      var k = normText(t.prompt);
+      if (!k) return;
+      for (var i = 0; i < B.length; i += 1) {
+        if (usedB[i] || normText(B[i].prompt) !== k) continue;
+        usedB[i] = 1;
+        t.responses.a = t.responses.a || B[i].responses.a || '';
+        t.responses.b = t.responses.b || B[i].responses.b || '';
+        break;
+      }
+    });
+    //  pass 2：提示词为空的轮次（模型 id 被跳过后回答先于提示词到达），按回答内容对齐提示词
+    merged.forEach(function (t) {
+      if (normText(t.prompt)) return;
+      var ka = normText(t.responses.a), kb = normText(t.responses.b);
+      if (!ka && !kb) return;
+      for (var i = 0; i < B.length; i += 1) {
+        if (usedB[i]) continue;
+        var ba = normText(B[i].responses.a), bb = normText(B[i].responses.b);
+        if ((ka && ba && ka === ba) || (kb && bb && kb === bb)) {
+          usedB[i] = 1;
+          t.prompt = B[i].prompt || t.prompt;
+          t.responses.a = t.responses.a || B[i].responses.a || '';
+          t.responses.b = t.responses.b || B[i].responses.b || '';
+          break;
+        }
+      }
+    });
+    //  pass 3：通用路径独有的轮次——提示词与已有轮次重复且回答为空，丢弃；否则补空槽位或追加
+    B.forEach(function (gt, i) {
+      if (usedB[i]) return;
+      var k = normText(gt.prompt);
+      var dupIdx = -1;
+      if (k) {
+        for (var j = 0; j < merged.length; j += 1) {
+          if (normText(merged[j].prompt) === k) { dupIdx = j; break; }
+        }
+      }
+      var hasA = gt.responses.a && gt.responses.a.trim();
+      var hasB = gt.responses.b && gt.responses.b.trim();
+      if (dupIdx >= 0) {
+        if (!hasA && !hasB) return; // 幽灵轮
+        if (!merged[dupIdx].responses.a && hasA) merged[dupIdx].responses.a = gt.responses.a;
+        if (!merged[dupIdx].responses.b && hasB) merged[dupIdx].responses.b = gt.responses.b;
+        return;
+      }
+      merged.push({ prompt: gt.prompt || '', responses: { a: gt.responses.a || '', b: gt.responses.b || '' } });
+    });
+    return dedupeTurns(merged);
   }
 
   function extractConversation() {
@@ -351,17 +432,9 @@
       models = { a: modelNames[0], b: '' };
     }
 
-    var title = (document.title || '').replace(/[-–|]\s*arena\.ai.*$/i, '').trim();
-    if (!title || /^arena\.ai$/i.test(title)) {
-      title = (turns[0] && (turns[0].prompt || turns[0].responses.a) || '未命名对话').replace(/\s+/g, ' ').trim().slice(0, 80);
-    }
-
     return {
       version: 1,
       created_at: new Date().toISOString(),
-      source: 'arena.ai',
-      source_url: window.location.href,
-      title: title,
       models: models,
       turns: turns,
     };
@@ -504,9 +577,6 @@
       payload = {
         version: 1,
         created_at: new Date().toISOString(),
-        source: 'arena.ai',
-        source_url: window.location.href,
-        title: (document.title || '').replace(/[-–|]\s*arena\.ai.*$/i, '').trim() || '未命名对话',
         models: null,
         turns: [{ prompt: '', responses: { a: '', b: '' } }],
       };
