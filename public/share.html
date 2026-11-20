@@ -324,7 +324,9 @@
         if (HTML_TAG_RE.test(raw)) {
           target.innerHTML = window.DOMPurify.sanitize(fixMissedMarkdown(raw), { USE_PROFILES: { html: true } });
         } else if (window.marked) {
-          target.innerHTML = window.DOMPurify.sanitize(window.marked.parse(raw, { breaks: true, gfm: true }), { USE_PROFILES: { html: true } });
+          // CommonMark 规则下「他说**“甲”**完」这类 ** 紧贴特殊符号且左侧是 CJK 文字时不算强调，marked 会原样保留；
+          // 再用 fixMissedMarkdown 在 marked 产物的文本节点里补齐一次（标签属性与 pre/code 内一律不动，整体仍过 DOMPurify）
+          target.innerHTML = window.DOMPurify.sanitize(fixMissedMarkdown(window.marked.parse(raw, { breaks: true, gfm: true })), { USE_PROFILES: { html: true } });
         } else {
           target.textContent = raw;
         }
