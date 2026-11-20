@@ -4,7 +4,7 @@
 
 - 访客打开链接看到的是「模型 A / 模型 B」的匿名对话，**默认隐藏模型名称**（与 arena.ai 一致）；
 - 访客投票（A 更好 / B 更好 / 平局 / 两个都差）后，真实模型名才会揭晓；
-- 每次投票都会记录到存储，站点所有者可在 **`/admin`** 页面用 SHARE_TOKEN 查看所有分享的详细票数；
+- 每次投票都会记录到存储，站点所有者可在 **`/admin.html`** 页面用 SHARE_TOKEN 查看所有分享的详细票数；
 - 创建分享链接的接口由 **SHARE_TOKEN** 保护，token 保存在用户脚本的本地存储（GM storage）中，**不进仓库**。
 
 ## 组成
@@ -13,8 +13,8 @@
 | --- | --- | --- |
 | 油猴用户脚本 | `userscript/arena-ai-share.user.js` | 在 arena.ai 页面抓取当前对话，审核后 POST 给后端 |
 | 后端 API | `api/` | Vercel serverless functions，零依赖，直接调用 Upstash/Vercel KV REST API |
-| 分享页 | `public/share.html` | `/s/<uuid>`，匿名渲染 + 投票揭晓 + 票数展示 |
-| 管理页 | `public/admin.html` | `/admin`，token 登录后查看所有分享的投票统计 |
+| 分享页 | `public/share.html` | `share.html?id=<uuid>`，匿名渲染 + 投票揭晓 + 票数展示 |
+| 管理页 | `public/admin.html` | `/admin.html`，token 登录后查看所有分享的投票统计 |
 | 首页 | `public/index.html` | 项目说明 |
 
 ## 架构
@@ -26,16 +26,16 @@ arena.ai 页面
 POST /api/shares   ← Authorization: Bearer <SHARE_TOKEN>
    │  写入 Vercel KV：share:<id>（对话 JSON）、shares:index（索引）
    ▼
-{ url: "https://<your-app>/s/<uuid>" }
+{ url: "https://<your-app>/share.html?id=<uuid>" }
    │
    ▼
-访客 GET /s/<id> ─► 分享页 ─► GET /api/share/<id>（模型名隐藏；若浏览器已投票则揭晓）
+访客 GET /share.html?id=<id> ─► 分享页 ─► GET /api/share/<id>（模型名隐藏；若浏览器已投票则揭晓）
    │
    ▼
 POST /api/vote/<id> { choice: a|b|tie|bad }  ← 计票写入 votes:<id>，下发 voted_<id>=1 cookie 并揭晓模型
    │
    ▼
-GET /api/admin/votes  ← Bearer <SHARE_TOKEN>，/admin 页面渲染统计
+GET /api/admin/votes  ← Bearer <SHARE_TOKEN>，/admin.html 页面渲染统计
 ```
 
 ## 部署步骤（已在你的账号中创建好的资源）
@@ -47,6 +47,14 @@ GET /api/admin/votes  ← Bearer <SHARE_TOKEN>，/admin 页面渲染统计
 5. **关闭部署保护**（你选择的公开访问方案）：Vercel Dashboard → `arena-blind-share` → Settings → Deployment Protection → 关闭 / 调整为「仅预览」。否则 `*.vercel.app` 链接需要 Vercel 登录才能访问，外人打不开。
 
 > 注意：环境变量修改后需要**重新部署**才生效。创建并关联 KV、改完部署保护后，在 Vercel 里点一次 Redeploy，或让我重新部署。
+
+
+## 部署说明（2026-11-20 首次部署的取舍）
+
+- 部署通过 Vercel API 直接上传文件（而非 Git 集成）完成，因为当前 Vercel 账号**未连接 GitHub**；如需 `git push` 自动部署，可在 Vercel Dashboard → `arena-blind-share` → Settings → Git 连接 `Dwscdv3/arena-ai-vercel-sharing`。
+- 本仓库因此**不使用 `vercel.json`**（上传部署不支持顶层 JSON 配置），分享链接形如 `/share.html?id=<uuid>`、管理页为 `/admin.html`。本地 `vercel dev` / Git 部署同样可用这两个地址。
+- 因此 API 响应头里也没有额外的安全响应头；函数本身带有 `Cache-Control: no-store`。
+- KV 未创建时 API 返回 `503 STORAGE_NOT_CONFIGURED`；SHARE_TOKEN 未配置时创建接口返回 500。
 
 ## 安装用户脚本
 
@@ -61,8 +69,8 @@ GET /api/admin/votes  ← Bearer <SHARE_TOKEN>，/admin 页面渲染统计
 
 1. 在 arena.ai 打一场 battle，回答生成完毕后点右下角「分享对话」。
 2. 检查抓取结果（arena.ai 的 DOM 会变化，抓不准就手动编辑 JSON；模型名可删掉保持匿名）。
-3. 点「生成分享链接」，把 `/s/<uuid>` 链接发出去。
-4. 访客投票后看到模型名；你自己在 `/admin` 输入 SHARE_TOKEN 查看每条分享的 A/B/平局/都差票数。
+3. 点「生成分享链接」，把 `/share.html?id=<uuid>` 链接发出去。
+4. 访客投票后看到模型名；你自己在 `/admin.html` 输入 SHARE_TOKEN 查看每条分享的 A/B/平局/都差票数。
 
 ## API
 
@@ -71,7 +79,7 @@ GET /api/admin/votes  ← Bearer <SHARE_TOKEN>，/admin 页面渲染统计
 | POST | `/api/shares` | `Bearer SHARE_TOKEN` | 创建分享，返回 `{ id, url, created_at }` |
 | GET | `/api/share/<id>` | 无 | 返回对话；投票前模型名为 `null`，投票后返回真名 + 票数 |
 | POST | `/api/vote/<id>` | 无（同浏览器防重复计票 cookie） | body: `{"choice":"a\|b\|tie\|bad"}`，返回揭晓后的模型 + 票数统计 |
-| GET | `/api/admin/votes` | `Bearer SHARE_TOKEN` | 所有分享的投票统计（`/admin` 页面使用） |
+| GET | `/api/admin/votes` | `Bearer SHARE_TOKEN` | 所有分享的投票统计（`/admin.html` 页面使用） |
 
 存储键：`share:<id>`（分享 JSON）、`votes:<id>`（`{a,b,tie,bad}` 计数）、`shares:index`（管理索引，最多 1000 条）。
 
@@ -80,7 +88,7 @@ GET /api/admin/votes  ← Bearer <SHARE_TOKEN>，/admin 页面渲染统计
 - `SHARE_TOKEN` 只通过环境变量和 GM 存储存在，仓库里没有任何真实 token（`.env*` 已 gitignore，`.env.example` 只有占位符）。
 - 模型名在服务端按「该浏览器是否已投票」决定是否返回，前端无法通过 API 提前拿到（投票前 `models: null`）。
 - 投票接口不要求登录（和公开投票一致），防重复计票依赖浏览器 cookie，可被清除绕过——如需强防刷，建议加验证码或登录。
-- `/admin` 使用 `crypto.timingSafeEqual` 比较 token。
+- `/admin.html` 使用 `crypto.timingSafeEqual` 比较 token。
 
 ## 已知限制
 

@@ -125,5 +125,5 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  sendJson(res, 201, { id, url: `${baseUrl(req)}/s/${id}`, created_at });
+  sendJson(res, 201, { id, url: `${baseUrl(req)}/share.html?id=${id}`, created_at });
 };

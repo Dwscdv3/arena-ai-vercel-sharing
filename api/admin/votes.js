@@ -50,7 +50,7 @@ module.exports = async function handler(req, res) {
           const share = rawShare ? JSON.parse(rawShare) : null;
           return {
             id: entry.id,
-            url: `${base}/s/${entry.id}`,
+            url: `${base}/share.html?id=${entry.id}`,
             title: entry.title || (share && share.title) || '',
             created_at: entry.created_at || (share && share.created_at) || null,
             models: share ? share.models : null,
@@ -61,7 +61,7 @@ module.exports = async function handler(req, res) {
           console.error(`Failed to load share ${entry.id}:`, err);
           return {
             id: entry.id,
-            url: `${base}/s/${entry.id}`,
+            url: `${base}/share.html?id=${entry.id}`,
             title: entry.title || '',
             created_at: entry.created_at || null,
             models: null,
