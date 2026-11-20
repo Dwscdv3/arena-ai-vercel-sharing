@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | 油猴用户脚本 | `userscript/arena-ai-share.user.js` | 在 arena.ai 页面抓取当前对话，审核后 POST 给后端 |
 | 后端 API | `api/` | Vercel serverless functions，零依赖，直接调用 Upstash/Vercel KV REST API |
-| 分享页 | `public/share.html` | `share.html?id=<uuid>`，匿名渲染 + 投票揭晓 + 票数展示 |
+| 分享页 | `public/share.html` | `share.html?id=<uuid>`，对话界面风格、黑白双主题（跟随 `prefers-color-scheme`）、无顶栏/无标题、Markdown 渲染；匿名显示，投票后在回答栏头部揭晓模型名；投票区仅标题「哪个回答更好？」+ 4 个按钮 |
 | 管理页 | `public/admin.html` | `/admin.html`，token 登录后查看所有分享的投票统计 |
 | 首页 | `public/index.html` | 项目说明 |
 
@@ -29,7 +29,7 @@ POST /api/shares   ← Authorization: Bearer <SHARE_TOKEN>
 { url: "https://<your-app>/share.html?id=<uuid>" }
    │
    ▼
-访客 GET /share.html?id=<id> ─► 分享页 ─► GET /api/share/<id>（模型名隐藏；若浏览器已投票则揭晓）
+访客 GET /share.html?id=<id> ─► 分享页（纯对话界面）─► GET /api/share/<id>（模型名隐藏；若浏览器已投票则揭晓）
    │
    ▼
 POST /api/vote/<id> { choice: a|b|tie|bad }  ← 计票写入 votes:<id>，下发 voted_<id>=1 cookie 并揭晓模型
