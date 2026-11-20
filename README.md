@@ -42,7 +42,7 @@ GET /api/admin/votes  ← Bearer <SHARE_TOKEN>，/admin.html 页面渲染统计
 
 1. **GitHub 仓库**：本仓库 `Dwscdv3/arena-ai-vercel-sharing`（公开）。
 2. **Vercel 项目**：`arena-blind-share`（team: Jingyao，outputDirectory: `public`，framework: Other）。
-3. **创建 KV 数据库**（你需要手动做一次）：Vercel Dashboard → Storage → Create Database → **Upstash for Redis / Vercel KV** → 创建后选择 Connect to Project → 选 `arena-blind-share`。这会自动注入 `KV_REST_API_URL` / `KV_REST_API_TOKEN`（或 `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`，代码两种都支持）。
+3. **KV 数据库**：已关联到 `arena-blind-share`（Vercel 集成自动注入了 `KV_REST_API_URL` / `KV_REST_API_TOKEN` 等环境变量，代码对 Upstash 直接集成注入的 `UPSTASH_REDIS_REST_*` 命名也兼容）。
 4. **SHARE_TOKEN**：已由部署流程设置为项目环境变量（encrypted）。用户脚本首次使用前，在油猴菜单里设置同一个 token（见下）。
 5. **关闭部署保护**（你选择的公开访问方案）：Vercel Dashboard → `arena-blind-share` → Settings → Deployment Protection → 关闭 / 调整为「仅预览」。否则 `*.vercel.app` 链接需要 Vercel 登录才能访问，外人打不开。
 
@@ -51,8 +51,9 @@ GET /api/admin/votes  ← Bearer <SHARE_TOKEN>，/admin.html 页面渲染统计
 
 ## 部署说明（2026-11-20 首次部署的取舍）
 
+- 线上地址：<https://arena-blind-share.vercel.app>（部署 ID `dpl_F43BQAJrvDUSjHjirhNZGC7dG4XF`，READY，别名 `arena-blind-share-jingyao.vercel.app`）。
 - 部署通过 Vercel API 直接上传文件（而非 Git 集成）完成，因为当前 Vercel 账号**未连接 GitHub**；如需 `git push` 自动部署，可在 Vercel Dashboard → `arena-blind-share` → Settings → Git 连接 `Dwscdv3/arena-ai-vercel-sharing`。
-- 本仓库因此**不使用 `vercel.json`**（上传部署不支持顶层 JSON 配置），分享链接形如 `/share.html?id=<uuid>`、管理页为 `/admin.html`。本地 `vercel dev` / Git 部署同样可用这两个地址。
+- 本仓库因此**不使用 `vercel.json`**（上传部署不支持顶层 JSON 配置）；项目框架预设为 `vite`、buildCommand 为 `echo skip`（无需构建，静态文件直接来自 `public/`），分享链接形如 `/share.html?id=<uuid>`、管理页为 `/admin.html`。本地 `vercel dev` / Git 部署同样可用这两个地址。如需 `/s/<uuid>` 美观路径，连上 GitHub 后重新加入 `vercel.json` rewrites 即可。
 - 因此 API 响应头里也没有额外的安全响应头；函数本身带有 `Cache-Control: no-store`。
 - KV 未创建时 API 返回 `503 STORAGE_NOT_CONFIGURED`；SHARE_TOKEN 未配置时创建接口返回 500。
 
