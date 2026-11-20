@@ -32,7 +32,17 @@ function sanitizeSharePayload(body) {
     if (prompt.length > MAX_FIELD || a.length > MAX_FIELD || b.length > MAX_FIELD) {
       return { error: 'FIELD_TOO_LARGE', message: `第 ${i + 1} 轮内容超出长度限制` };
     }
-    cleanTurns.push({ prompt, responses: { a, b } });
+    // 每轮可带模型名（揭晓前仅服务端可见，投完票才按轮返回）
+    const tm = turn.models && typeof turn.models === 'object' ? turn.models : null;
+    let cleanTurnModels = null;
+    if (tm) {
+      const ta = typeof tm.a === 'string' ? tm.a.slice(0, 80).trim() : '';
+      const tb = typeof tm.b === 'string' ? tm.b.slice(0, 80).trim() : '';
+      if (ta || tb) cleanTurnModels = { a: ta, b: tb };
+    }
+    const cleanTurn = { prompt, responses: { a, b } };
+    if (cleanTurnModels) cleanTurn.models = cleanTurnModels;
+    cleanTurns.push(cleanTurn);
   }
 
   let cleanModels = null;
