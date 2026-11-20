@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arena Blind Share
 // @namespace    https://github.com/Dwscdv3/arena-ai-vercel-sharing
-// @version      1.2.0
+// @version      1.3.0
 // @description  把当前 arena.ai 对战对话保存下来，生成「投票后才揭晓模型名」的匿名分享链接（由 Vercel 后端托管）
 // @author       Dwscdv3
 // @homepage     https://github.com/Dwscdv3/arena-ai-vercel-sharing
@@ -76,8 +76,20 @@
     return kept;
   }
 
+  // arena.ai 的用户提示词行/气泡带有这些右对齐/凸起表面标记，用于区分"我"说的话和模型的回答
+  function hasUserSideMarker(el) {
+    var node = el;
+    for (var i = 0; i < 10 && node && node.nodeType === 1 && node !== document.body && node !== document.documentElement; i += 1) {
+      var cls = (node.className && node.className.toString ? node.className.toString() : '').toLowerCase();
+      if (/justify-end|self-end|bg-surface-raised/.test(cls)) return true;
+      node = node.parentElement;
+    }
+    return false;
+  }
+
   function isUserNode(el) {
     if (!el.getAttribute) return false;
+    if (hasUserSideMarker(el)) return true;
     var role = (el.getAttribute('data-role') || el.getAttribute('data-author') || el.getAttribute('data-message-author-role') || '').toLowerCase();
     if (role === 'user' || role === 'human') return true;
     var cls = (el.className && el.className.toString ? el.className.toString() : '').toLowerCase();
@@ -128,9 +140,10 @@
         el.getAttribute('data-testid'),
         el.getAttribute('data-action'),
         (el.textContent || '').trim().slice(0, 30),
-        (el.innerHTML || '').slice(0, 400),
+        (el.innerHTML || '').slice(0, 2500),
       ].join(' ').toLowerCase();
-      if (/copy|clipboard|复制|拷贝/.test(haystack)) {
+      // 匹配文案/属性里的 copy|clipboard|复制，或 arena.ai 图标按钮里的 lucide "copy" 图标路径
+      if (/copy|clipboard|复制|拷贝|m19\.4|m15 9v4|lucide-copy/.test(haystack)) {
         seen.add(el);
         out.push(el);
       }
@@ -187,6 +200,12 @@
     // 含 markdown 正文的几乎都是模型回答
     if (container.querySelector && container.querySelector('.prose, .markdown, .markdown-body')) return 'assistant';
     return 'unknown';
+  }
+
+  // 通用路径取 kind：用户标记优先（arena.ai 的提示词也是 .prose）
+  function kindFor(el) {
+    if (hasUserSideMarker(el)) return 'user';
+    return isUserNode(el) ? 'user' : 'assistant';
   }
 
   // ---------- 通用组装：把分类后的消息块归并成轮次 ----------
@@ -260,7 +279,7 @@
     nodes.sort(byDocOrder);
 
     var items = nodes.map(function (el) {
-      return { el: el, text: getText(el), kind: isUserNode(el) ? 'user' : 'assistant' };
+      return { el: el, text: getText(el), kind: kindFor(el) };
     });
     return assembleTurns(items);
   }
