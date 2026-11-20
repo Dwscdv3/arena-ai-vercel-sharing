@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arena Blind Share
 // @namespace    https://github.com/Dwscdv3/arena-ai-vercel-sharing
-// @version      1.1.0
+// @version      1.2.0
 // @description  把当前 arena.ai 对战对话保存下来，生成「投票后才揭晓模型名」的匿名分享链接（由 Vercel 后端托管）
 // @author       Dwscdv3
 // @homepage     https://github.com/Dwscdv3/arena-ai-vercel-sharing
@@ -97,6 +97,174 @@
     return false;
   }
 
+  function isVisibleEl(el) {
+    try {
+      var rect = el.getBoundingClientRect();
+      var style = window.getComputedStyle(el);
+      return rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    } catch (_) { return true; }
+  }
+
+  function byDocOrder(a, b) {
+    if (a === b) return 0;
+    var pos = a.compareDocumentPosition(b);
+    return pos & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+  }
+
+  // ---------- 基于「复制」按钮定位消息（arena.ai 每条消息都有复制按钮） ----------
+
+  function findCopyButtons() {
+    var candidates = Array.prototype.slice.call(
+      document.querySelectorAll('button, [role="button"], [aria-label], [title]')
+    );
+    var seen = new Set();
+    var out = [];
+    candidates.forEach(function (el) {
+      if (!el || seen.has(el)) return;
+      if (el.closest && el.closest('[data-abs-ignore]')) return; // 排除脚本自己的 UI
+      var haystack = [
+        el.getAttribute('aria-label'),
+        el.getAttribute('title'),
+        el.getAttribute('data-testid'),
+        el.getAttribute('data-action'),
+        (el.textContent || '').trim().slice(0, 30),
+        (el.innerHTML || '').slice(0, 400),
+      ].join(' ').toLowerCase();
+      if (/copy|clipboard|复制|拷贝/.test(haystack)) {
+        seen.add(el);
+        out.push(el);
+      }
+    });
+    return out;
+  }
+
+  // 从复制按钮向上找「包含除按钮文字外还有其它文字」的最小祖先，即消息块
+  function messageContainerFor(btn) {
+    var el = btn.parentElement;
+    for (var depth = 0; depth < 8 && el && el.nodeType === 1; depth += 1) {
+      if (el === document.body || el === document.documentElement) return null;
+      var buttonsText = 0;
+      var btns = el.querySelectorAll('button, [role="button"]');
+      for (var i = 0; i < btns.length; i++) {
+        buttonsText += (btns[i].innerText || '').trim().length;
+      }
+      var contentText = (el.innerText || '').trim().length - buttonsText;
+      if (contentText >= 1) return el;
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  // 从消息块里取正文：优先 .prose/markdown，否则取不含按钮的文本最长的直接子元素
+  function messageText(container, btn) {
+    var prose = container.querySelector
+      ? container.querySelector('.prose, .markdown, .markdown-body')
+      : null;
+    if (!prose) {
+      var best = null;
+      var bestLen = 0;
+      Array.prototype.slice.call(container.children).forEach(function (child) {
+        if (child === btn || (child.contains && child.contains(btn))) return;
+        var len = (child.innerText || '').trim().length;
+        if (len > bestLen) { best = child; bestLen = len; }
+      });
+      prose = best;
+    }
+    var text = (prose || container).innerText || '';
+    // 去掉可能粘连的按钮文案（如末尾的“复制 / Copied!”）
+    var stripped = text;
+    for (var i = 0; i < 4; i += 1) {
+      var next = stripped.replace(/(已复制到剪贴板|已复制|复制成功|复制答案|复制|拷贝|点赞|踩|有帮助|没帮助|copied!?|copy)\s*$/i, '').trim();
+      if (next === stripped) break;
+      stripped = next;
+    }
+    return stripped.trim();
+  }
+
+  function classifyMessageBlock(container) {
+    if (isUserNode(container)) return 'user';
+    if (isAssistantNode(container)) return 'assistant';
+    // 含 markdown 正文的几乎都是模型回答
+    if (container.querySelector && container.querySelector('.prose, .markdown, .markdown-body')) return 'assistant';
+    return 'unknown';
+  }
+
+  // ---------- 通用组装：把分类后的消息块归并成轮次 ----------
+
+  function assembleTurns(items) {
+    var turns = [];
+    var current = null;
+    var seen = new Set();
+    items.forEach(function (item) {
+      var text = item.text;
+      if (!text) return;
+      var key = text.slice(0, 200);
+      if (seen.has(key)) return;
+      seen.add(key);
+      var kind = item.kind;
+      if (kind === 'unknown') {
+        if (!current) {
+          kind = 'user'; // 对话的第一个块大概率是用户提示词
+        } else {
+          kind = (current.responses.a && current.responses.b) ? 'user' : 'assistant';
+        }
+      }
+      if (kind === 'user') {
+        current = { prompt: text, responses: { a: '', b: '' } };
+        turns.push(current);
+        return;
+      }
+      if (!current) {
+        current = { prompt: '', responses: { a: '', b: '' } };
+        turns.push(current);
+      }
+      var side = sideOf(item.el);
+      if (current.responses[side]) side = side === 'a' ? 'b' : 'a';
+      if (!current.responses[side]) current.responses[side] = text;
+    });
+    return turns;
+  }
+
+  function dedupeItems(items) {
+    var els = dedupeNested(items.map(function (it) { return it.el; }));
+    var keep = new Set(els);
+    return items.filter(function (it) { return keep.has(it.el); });
+  }
+
+  function extractViaCopyButtons() {
+    var buttons = findCopyButtons();
+    var items = [];
+    var seenEls = new Set();
+    buttons.forEach(function (btn) {
+      var container = messageContainerFor(btn);
+      if (!container || seenEls.has(container)) return;
+      seenEls.add(container);
+      var text = messageText(container, btn);
+      if (!text) return;
+      items.push({ el: container, text: text, kind: classifyMessageBlock(container) });
+    });
+    items = items.filter(function (it) { return isVisibleEl(it.el); });
+    items.sort(function (a, b) { return byDocOrder(a.el, b.el); });
+    return assembleTurns(dedupeItems(items));
+  }
+
+  function extractGenericTurns() {
+    var raw = Array.prototype.slice.call(
+      document.querySelectorAll('.prose, .markdown, .markdown-body, [data-role], [data-author], [data-testid*="message" i], [data-testid*="prompt" i], [data-testid*="response" i], [class*="message" i], [class*="response" i], [class*="user-message" i], [class*="assistant-message" i], [class*="userMessage"], [class*="assistantMessage"], [class*="HumanMessage"], [class*="AIMessage"]')
+    ).filter(function (el) { return getText(el).length > 0; });
+
+    var nodes = dedupeNested(raw)
+      .filter(isVisibleEl)
+      .filter(function (el) { return isUserNode(el) || isAssistantNode(el); });
+
+    nodes.sort(byDocOrder);
+
+    var items = nodes.map(function (el) {
+      return { el: el, text: getText(el), kind: isUserNode(el) ? 'user' : 'assistant' };
+    });
+    return assembleTurns(items);
+  }
+
   function sideOf(el) {
     try {
       var rect = el.getBoundingClientRect();
@@ -125,57 +293,34 @@
     return found.map(function (f) { return f.name; });
   }
 
+  function mergeTurns(viaButtons, viaGeneric) {
+    if (!viaButtons.length || !viaGeneric.length) {
+      return viaButtons.length ? viaButtons : viaGeneric;
+    }
+    // 两条路径都有结果时做对齐合并：通用路径优先提供提示词（若抓到），
+    // 复制按钮路径优先提供两侧回答（内容更完整、不含按钮文案）
+    var merged = [];
+    var n = Math.max(viaButtons.length, viaGeneric.length);
+    for (var i = 0; i < n; i += 1) {
+      var bt = viaButtons[i] || { prompt: '', responses: { a: '', b: '' } };
+      var gt = viaGeneric[i] || { prompt: '', responses: { a: '', b: '' } };
+      merged.push({
+        prompt: gt.prompt || bt.prompt,
+        responses: {
+          a: bt.responses.a || gt.responses.a,
+          b: bt.responses.b || gt.responses.b,
+        },
+      });
+    }
+    return merged;
+  }
+
   function extractConversation() {
-    var raw = Array.prototype.slice.call(
-      document.querySelectorAll('.prose, .markdown, .markdown-body, [data-role], [data-author], [data-testid*="message" i], [data-testid*="prompt" i], [data-testid*="response" i], [class*="message" i], [class*="response" i], [class*="user-message" i], [class*="assistant-message" i], [class*="userMessage"], [class*="assistantMessage"], [class*="HumanMessage"], [class*="AIMessage"]')
-    ).filter(function (el) { return getText(el).length > 0; });
-
-    var nodes = dedupeNested(raw)
-      // 过滤不可见节点
-      .filter(function (el) {
-        try {
-          var rect = el.getBoundingClientRect();
-          var style = window.getComputedStyle(el);
-          return rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
-        } catch (_) { return true; }
-      })
-      .filter(function (el) { return isUserNode(el) || isAssistantNode(el); });
-
-    // 按文档顺序
-    nodes.sort(function (a, b) {
-      if (a === b) return 0;
-      var pos = a.compareDocumentPosition(b);
-      return pos & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
-    });
-
-    var turns = [];
-    var current = null;
-    var seen = new Set();
-
-    nodes.forEach(function (el) {
-      var text = getText(el);
-      if (!text) return;
-      var key = text.slice(0, 200);
-      // 跳过完全相同的重复文本（嵌套去重后仍可能漏掉）
-      if (seen.has(key)) return;
-      seen.add(key);
-
-      if (isUserNode(el)) {
-        current = { prompt: text, responses: { a: '', b: '' } };
-        turns.push(current);
-        return;
-      }
-      if (!current) {
-        current = { prompt: '', responses: { a: '', b: '' } };
-        turns.push(current);
-      }
-      var side = sideOf(el);
-      if (current.responses[side]) side = side === 'a' ? 'b' : 'a';
-      if (!current.responses[side]) current.responses[side] = text;
-    });
+    var viaButtons = extractViaCopyButtons();
+    var viaGeneric = extractGenericTurns();
 
     // 清理完全为空的轮次
-    turns = turns.filter(function (t) {
+    var turns = mergeTurns(viaButtons, viaGeneric).filter(function (t) {
       return (t.prompt && t.prompt.trim()) || t.responses.a.trim() || t.responses.b.trim();
     });
 
