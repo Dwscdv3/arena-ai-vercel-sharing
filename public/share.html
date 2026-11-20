@@ -45,7 +45,7 @@
   main { max-width: 1080px; margin: 0 auto; padding: 28px 20px 64px; }
 
   /* ---------- 对话轮次 ---------- */
-  .turn { margin-bottom: 28px; }
+  .turn { margin-bottom: 28px; scroll-margin-top: 16px; }
   .turn:last-child { margin-bottom: 0; }
 
   .prompt {
@@ -86,6 +86,19 @@
     flex: none;
   }
   .cell-title { font-weight: 600; font-size: 0.92rem; }
+
+  /* 投票后揭晓的优胜组：绿色边框 + 浅绿底的头部 */
+  .cell.winner {
+    border-color: #16a34a;
+    box-shadow: 0 0 0 2px #16a34a, 0 1px 2px var(--shadow);
+  }
+  .cell.winner .cell-head { background: rgba(22, 163, 74, 0.08); }
+  .winner-badge { font-size: 0.68rem; font-weight: 700; color: #15803d; border: 1px solid currentColor; border-radius: 999px; padding: 1px 8px; margin-left: auto; }
+  @media (prefers-color-scheme: dark) {
+    .cell.winner { border-color: #22c55e; box-shadow: 0 0 0 2px #22c55e, 0 1px 2px var(--shadow); }
+    .cell.winner .cell-head { background: rgba(34, 197, 94, 0.10); }
+    .winner-badge { color: #4ade80; }
+  }
 
   .cell-body {
     padding: 14px 16px;
@@ -219,17 +232,36 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
-  function renderMarkdown(target, text) {
+  var HTML_TAG_RE = /<(?:p|div|ul|ol|li|pre|code|table|thead|tbody|tr|th|td|h[1-6]|blockquote|hr|img|a|strong|em|br|dl|dt|dd|figure|kbd|del|mark|sub|sup)\b[^>]*>/i;
+
+  // v1.6.0 起 userscript 抓的是「清洗后的语义 HTML」；旧分享存的是 Markdown 文本——两者都能渲染
+  var purifyHooked = false;
+  function renderContent(target, text) {
     var raw = String(text || '');
     try {
-      if (window.marked && window.DOMPurify) {
-        target.innerHTML = window.DOMPurify.sanitize(window.marked.parse(raw, { breaks: true, gfm: true }));
+      if (window.DOMPurify) {
+        if (!purifyHooked) {
+          window.DOMPurify.addHook('afterSanitizeAttributes', function (node) {
+            if (node.tagName === 'A') {
+              node.setAttribute('target', '_blank');
+              node.setAttribute('rel', 'noopener noreferrer');
+            }
+          });
+          purifyHooked = true;
+        }
+        if (HTML_TAG_RE.test(raw)) {
+          target.innerHTML = window.DOMPurify.sanitize(raw, { USE_PROFILES: { html: true } });
+        } else if (window.marked) {
+          target.innerHTML = window.DOMPurify.sanitize(window.marked.parse(raw, { breaks: true, gfm: true }), { USE_PROFILES: { html: true } });
+        } else {
+          target.textContent = raw;
+        }
         return;
       }
     } catch (err) {
-      console.error('markdown render failed, falling back to plain text', err);
+      console.error('render failed, falling back to plain text', err);
     }
-    target.innerHTML = '<pre style="white-space:pre-wrap">' + escapeHtml(raw) + '</pre>';
+    target.textContent = raw;
   }
 
   function modelLabel(models, side) {
@@ -241,6 +273,38 @@
 
   function isTurnVoted(index) {
     return state.votedTurns.indexOf(index) !== -1;
+  }
+
+  function voteKey(index) { return 'abs_vote_' + SHARE_ID + '_' + index; }
+
+  function storedChoice(index) {
+    try { return window.localStorage.getItem(voteKey(index)) || null; } catch (_) { return null; }
+  }
+  function saveChoice(index, choice) {
+    try { window.localStorage.setItem(voteKey(index), choice); } catch (_) { /* 私密模式等存不了就算了 */ }
+  }
+
+  // 优胜侧加绿色边框（仅 a/b 抉择；平局/两差没有优胜侧）+ 在头部加「你的选择」徽标
+  function applyWinner(turnIndex, choice) {
+    if (choice !== 'a' && choice !== 'b') return;
+    var root = $('.turn[data-turn="' + turnIndex + '"]');
+    if (!root) return;
+    var cell = $('.cell[data-side="' + choice + '"]', root);
+    if (cell) {
+      cell.classList.add('winner');
+      var head = $('.cell-head', cell);
+      if (head && !$('.winner-badge', head)) {
+        var badge = document.createElement('span');
+        badge.className = 'winner-badge';
+        badge.textContent = '你的选择';
+        head.appendChild(badge);
+      }
+    }
+  }
+
+  function scrollToTurn(turnIndex) {
+    var root = $('.turn[data-turn="' + turnIndex + '"]');
+    if (root && root.scrollIntoView) root.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   function applyHeaders(turnIndex) {
@@ -278,7 +342,7 @@
       if (turn.prompt && turn.prompt.trim()) {
         var promptEl = document.createElement('div');
         promptEl.className = 'prompt md';
-        renderMarkdown(promptEl, turn.prompt);
+        renderContent(promptEl, turn.prompt);
         turnEl.appendChild(promptEl);
       }
 
@@ -287,6 +351,7 @@
       ['a', 'b'].forEach(function (side) {
         var cell = document.createElement('div');
         cell.className = 'cell';
+        cell.setAttribute('data-side', side);
         cell.innerHTML =
           '<div class="cell-head">' +
             '<div class="avatar">' + side.toUpperCase() + '</div>' +
@@ -296,7 +361,7 @@
         body.className = 'cell-body md';
         var content = (turn.responses && turn.responses[side]) || '';
         if (content.trim()) {
-          renderMarkdown(body, content);
+          renderContent(body, content);
         } else {
           body.innerHTML = '<p style="color:var(--muted)">（该侧无内容）</p>';
         }
@@ -353,7 +418,11 @@
     renderTurns(data.turns || []);
     applyAllHeaders();
 
-    state.votedTurns.forEach(function (i) { disableTurnButtons(i, null); });
+    state.votedTurns.forEach(function (i) {
+      var choice = storedChoice(i);
+      disableTurnButtons(i, choice);
+      if (choice) applyWinner(i, choice);
+    });
   }
 
   async function castVote(turnIndex, choice) {
@@ -374,6 +443,9 @@
       if (data.models) state.turnModels[turnIndex] = data.models;
       applyHeaders(turnIndex);
       disableTurnButtons(turnIndex, choice);
+      saveChoice(turnIndex, choice);
+      applyWinner(turnIndex, choice);
+      scrollToTurn(turnIndex); // 揭晓后把视角带到该轮头部，看清模型名与优胜框
     } catch (err) {
       console.error(err);
       alert(err.message || '投票失败，请稍后重试。');

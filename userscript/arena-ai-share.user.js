@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arena Blind Share
 // @namespace    https://github.com/Dwscdv3/arena-ai-vercel-sharing
-// @version      1.5.0
+// @version      1.6.0
 // @description  把当前 arena.ai 对战对话保存下来，生成「投票后才揭晓模型名」的匿名分享链接（由 Vercel 后端托管）
 // @author       Dwscdv3
 // @homepage     https://github.com/Dwscdv3/arena-ai-vercel-sharing
@@ -58,6 +58,84 @@
 
   function getText(el) {
     return (el.innerText || '').trim();
+  }
+
+  // ---------- HTML 清洗：抓原始 HTML，去掉样式/脚本/交互元素，只留语义标签 ----------
+  // 说明：渲染端 share.html 还有一层 DOMPurify 作为最终防线，这里的工作只是让抓取物干净可读。
+  var KEEP_TAGS = {
+    p:1, br:1, hr:1, ul:1, ol:1, li:1, dl:1, dt:1, dd:1,
+    pre:1, code:1, kbd:1, samp:1, var:1, blockquote:1,
+    h1:1, h2:1, h3:1, h4:1, h5:1, h6:1,
+    strong:1, b:1, em:1, i:1, u:1, del:1, s:1, ins:1, mark:1, sub:1, sup:1, small:1,
+    a:1, img:1, table:1, thead:1, tbody:1, tfoot:1, tr:1, th:1, td:1, caption:1,
+    figure:1, figcaption:1,
+    bdi:1, bdo:1, wbr:1,
+  };
+  // 整块连同内容删掉的标签（arena.ai 的复制/点赞/朗读按钮、隐藏徽标、各类图标）
+  var DROP_BLOCK_TAGS = ['script', 'style', 'noscript', 'template', 'iframe', 'object', 'embed',
+    'button', 'input', 'textarea', 'select', 'form', 'svg', 'math', 'video', 'audio', 'canvas'];
+
+  function stripTags(html) {
+    return String(html || '')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function pickAttr(attrsText, wanted) {
+    var out = '';
+    var re = /([a-zA-Z-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g;
+    var m;
+    while ((m = re.exec(attrsText || '')) !== null) {
+      var name = m[1].toLowerCase();
+      if (wanted.indexOf(name) === -1) continue;
+      var value = (m[2] !== undefined ? m[2] : (m[3] !== undefined ? m[3] : m[4])) || '';
+      value = value.trim();
+      if (!value) continue;
+      if (name === 'href' && !/^(https?:|mailto:|#)/i.test(value)) continue; // 禁 javascript: 等
+      if (name === 'src' && !/^(https?:|data:image\/)/i.test(value)) continue;
+      value = value.replace(/"/g, '&quot;'); // 防止闭合符破坏属性
+      out += ' ' + name + '="' + value + '"';
+    }
+    return out;
+  }
+
+  // 把 arena 页面的 innerHTML 清洗成「只保留语义」的 HTML
+  function sanitizeHtml(html) {
+    var out = String(html || '');
+    // 1) 注释
+    out = out.replace(/<!--[\s\S]*?-->/g, '');
+    // 2) 成对删除的交互/无语义块
+    for (var i = 0; i < DROP_BLOCK_TAGS.length; i += 1) {
+      var t = DROP_BLOCK_TAGS[i];
+      var pair = new RegExp('<' + t + '\\b[\\s\\S]*?<\\/' + t + '\\s*>', 'gi');
+      var solo = new RegExp('<' + t + '\\b[^>]*\\/?>', 'gi');
+      out = out.replace(pair, '').replace(solo, '');
+    }
+    // 3) 隐藏元素（class/style 里带 hidden/display:none/aria-hidden=true 的整个节点难以可靠成对切分，
+    //    这里直接删常见的 hidden 徽标自闭合写法；成对写法在第 4 步按 class 删）
+    // 4) 逐个处理剩余标签
+    out = out.replace(/<\/?([a-zA-Z][a-zA-Z0-9]*)((?:"[^"]*"|'[^']*'|[^'">])*)>/g, function (match, rawTag, attrs) {
+      var t = String(rawTag).toLowerCase();
+      var isClose = match.charAt(1) === '/';
+      if (isClose) return KEEP_TAGS[t] ? '</' + t + '>' : '';
+      if (t === 'img' || t === 'br' || t === 'hr' || t === 'wbr') {
+        if (!KEEP_TAGS[t]) return '';
+        return '<' + t + (t === 'img' ? pickAttr(attrs, ['src', 'alt']) : '') + '>';
+      }
+      if (KEEP_TAGS[t]) {
+        if (t === 'a') return '<a' + pickAttr(attrs, ['href', 'title']) + '>';
+        return '<' + t + '>';
+      }
+      // 未识别/表现层标签（div、span、section…）：去掉标签本身、保留内容（unwrap）
+      return '';
+    });
+    // 5) 合并多余空白行，避免 payload 被格式空白撑大
+    out = out.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+\n/g, '\n').trim();
+    return out;
   }
 
   function dedupeNested(nodes) {
@@ -216,22 +294,25 @@
     return lastCandidate;
   }
 
-  // 从消息块里取正文：优先 .prose/markdown，否则取不含按钮的文本最长的直接子元素
-  function messageText(container, btn) {
+  // 找到消息块里的正文节点：优先 .prose/markdown，否则取不含按钮的文本最长的直接子元素
+  function findProse(container, btn) {
     var prose = container.querySelector
       ? container.querySelector('.prose, .markdown, .markdown-body')
       : null;
-    if (!prose) {
-      var best = null;
-      var bestLen = 0;
-      Array.prototype.slice.call(container.children).forEach(function (child) {
-        if (child === btn || (child.contains && child.contains(btn))) return;
-        var len = (child.innerText || '').trim().length;
-        if (len > bestLen) { best = child; bestLen = len; }
-      });
-      prose = best;
-    }
-    var text = (prose || container).innerText || '';
+    if (prose) return prose;
+    var best = null;
+    var bestLen = 0;
+    Array.prototype.slice.call(container.children).forEach(function (child) {
+      if (btn && (child === btn || (child.contains && child.contains(btn)))) return;
+      var len = (child.innerText || '').trim().length;
+      if (len > bestLen) { best = child; bestLen = len; }
+    });
+    return best || container;
+  }
+
+  // 从消息块里取正文文本（用于去重/判空/分类，不进 payload）
+  function messageText(container, btn) {
+    var text = (findProse(container, btn).innerText || '');
     // 去掉可能粘连的按钮文案（如末尾的“复制 / Copied!”）
     var stripped = text;
     for (var i = 0; i < 4; i += 1) {
@@ -240,6 +321,14 @@
       stripped = next;
     }
     return stripped.trim();
+  }
+
+  // 从消息块里取正文 HTML（payload 里保存的就是它）：抓 innerHTML 后清洗掉样式/脚本/交互元素，只留语义
+  function messageHtml(container, btn) {
+    var prose = findProse(container, btn);
+    var raw = prose && prose.innerHTML ? prose.innerHTML : '';
+    if (!raw.trim()) raw = prose && prose.textContent ? prose.textContent : '';
+    return sanitizeHtml(raw);
   }
 
   function classifyMessageBlock(container) {
@@ -264,6 +353,7 @@
     var prevKey = '';
     items.forEach(function (item) {
       var text = item.text;
+      var html = item.html || '';
       if (!text) return;
       if (isModelIdLike(text)) return; // 模型 id 徽标（如 gemini-4-carbon-high）不是对话内容
       var key = text.replace(/\s+/g, ' ').trim().slice(0, 200);
@@ -278,7 +368,7 @@
         }
       }
       if (kind === 'user') {
-        current = { prompt: text, responses: { a: '', b: '' } };
+        current = { prompt: html, responses: { a: '', b: '' } };
         turns.push(current);
         return;
       }
@@ -288,7 +378,7 @@
       }
       var side = sideOf(item.el);
       if (current.responses[side]) side = side === 'a' ? 'b' : 'a';
-      if (!current.responses[side]) current.responses[side] = text;
+      if (!current.responses[side]) current.responses[side] = html;
     });
     return turns;
   }
@@ -309,7 +399,7 @@
       seenEls.add(container);
       var text = messageText(container, btn);
       if (!text || isModelIdLike(text)) return;
-      items.push({ el: container, text: text, kind: classifyMessageBlock(container) });
+      items.push({ el: container, text: text, html: messageHtml(container, btn), kind: classifyMessageBlock(container) });
     });
     items = items.filter(function (it) { return isVisibleEl(it.el); });
     applyVisualOrder(items, function (it) { return it.el; }); // 文档序 -> 视觉序
@@ -329,7 +419,7 @@
     applyVisualOrder(nodes, function (el) { return el; }); // 文档序 -> 视觉序
 
     var items = nodes.map(function (el) {
-      return { el: el, text: getText(el), kind: kindFor(el) };
+      return { el: el, text: getText(el), html: sanitizeHtml(el.innerHTML || ''), kind: kindFor(el) };
     });
     return assembleTurns(items);
   }
@@ -357,10 +447,12 @@
     return KNOWN_MODEL_RE.test(t);
   }
 
-  function normText(t) { return (t || '').trim().replace(/\s+/g, ' ').toLowerCase(); }
+  function normText(t) { return stripTags(t).replace(/\s+/g, ' ').toLowerCase(); }
+
+  function hasRealContent(html) { return stripTags(html).length > 0; }
 
   function isEmptyTurn(t) {
-    return !(t.prompt && t.prompt.trim()) && !(t.responses.a && t.responses.a.trim()) && !(t.responses.b && t.responses.b.trim());
+    return !hasRealContent(t.prompt) && !hasRealContent(t.responses.a) && !hasRealContent(t.responses.b);
   }
 
   // 合并后清理：1) 完全相同的重复轮次只保留一份；2) 同一提示词若已有带回答的轮次，丢弃回答为空的「幽灵轮次」
@@ -375,13 +467,13 @@
     });
     var answered = {};
     out.forEach(function (t) {
-      if (t.prompt && ((t.responses.a && t.responses.a.trim()) || (t.responses.b && t.responses.b.trim()))) {
+      if (hasRealContent(t.prompt) && (hasRealContent(t.responses.a) || hasRealContent(t.responses.b))) {
         answered[normText(t.prompt)] = 1;
       }
     });
     return out.filter(function (t) {
       var k = normText(t.prompt);
-      if (k && answered[k] && !(t.responses.a && t.responses.a.trim()) && !(t.responses.b && t.responses.b.trim())) return false;
+      if (k && answered[k] && !hasRealContent(t.responses.a) && !hasRealContent(t.responses.b)) return false;
       return true;
     });
   }
@@ -439,8 +531,8 @@
   }
 
   function mergeTurns(viaButtons, viaGeneric) {
-    var A = (viaButtons || []).filter(function (t) { return !isEmptyTurn(t) && !isModelIdLike(t.prompt); });
-    var B = (viaGeneric || []).filter(function (t) { return !isEmptyTurn(t) && !isModelIdLike(t.prompt); });
+    var A = (viaButtons || []).filter(function (t) { return !isEmptyTurn(t) && !isModelIdLike(stripTags(t.prompt)); });
+    var B = (viaGeneric || []).filter(function (t) { return !isEmptyTurn(t) && !isModelIdLike(stripTags(t.prompt)); });
     if (!A.length) return dedupeTurns(B);
     if (!B.length) return dedupeTurns(A);
     var merged = A.map(function (t) {
@@ -486,8 +578,8 @@
           if (normText(merged[j].prompt) === k) { dupIdx = j; break; }
         }
       }
-      var hasA = gt.responses.a && gt.responses.a.trim();
-      var hasB = gt.responses.b && gt.responses.b.trim();
+      var hasA = hasRealContent(gt.responses.a);
+      var hasB = hasRealContent(gt.responses.b);
       if (dupIdx >= 0) {
         if (!hasA && !hasB) return; // 幽灵轮
         if (!merged[dupIdx].responses.a && hasA) merged[dupIdx].responses.a = gt.responses.a;
@@ -505,7 +597,7 @@
 
     // 清理完全为空的轮次
     var turns = mergeTurns(viaButtons, viaGeneric).filter(function (t) {
-      return (t.prompt && t.prompt.trim()) || t.responses.a.trim() || t.responses.b.trim();
+      return hasRealContent(t.prompt) || hasRealContent(t.responses.a) || hasRealContent(t.responses.b);
     });
 
     // 每轮对战可能有不同的模型对：按视觉顺序把模型名挂到对应轮次
@@ -551,7 +643,7 @@
       '<div class="abs-modal" role="dialog" aria-modal="true">' +
         '<div class="abs-head"><span>分享当前对话</span><button class="abs-close" title="关闭">×</button></div>' +
         '<div class="abs-body">' +
-          '<p class="abs-hint">抓取结果如下。你可以直接编辑 JSON（例如修正模型名或删掉多余内容），确认后点击发送。模型名留空将保持匿名。</p>' +
+          '<p class="abs-hint">抓取结果如下（回答为清洗后的 HTML，已去掉样式和按钮等交互元素，Markdown 渲染出的粗体/列表/代码块都保留）。你可以直接编辑 JSON，确认后点击发送。模型名留空将保持匿名。</p>' +
           '<textarea class="abs-json" spellcheck="false"></textarea>' +
           '<p class="abs-meta"></p>' +
         '</div>' +
