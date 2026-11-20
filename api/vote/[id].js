@@ -106,13 +106,20 @@ module.exports = async function handler(req, res) {
     `Max-Age=${60 * 60 * 24 * 365}`,
   ].join('; ');
 
+  // 揭晓本轮模型名：优先每轮模型名；旧版分享回退到整场共用的 models
+  const turnObj = Array.isArray(share.turns) ? share.turns[turn] : null;
+  const tm = turnObj && turnObj.models;
+  const models = tm && ((tm.a && String(tm.a).trim()) || (tm.b && String(tm.b).trim()))
+    ? { a: tm.a || '', b: tm.b || '' }
+    : (share.models || null);
+
   sendJson(res, 200, {
     id,
     turn,
     voted: true,
     already_voted: alreadyVoted,
     choice: alreadyVoted ? null : choice,
-    models: share.models,
+    models,
     tallies: turnTallies,
   }, { 'Set-Cookie': cookie });
 };

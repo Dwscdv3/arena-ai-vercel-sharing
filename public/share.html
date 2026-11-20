@@ -237,7 +237,7 @@
     return side === 'a' ? '模型 A' : '模型 B';
   }
 
-  var state = { models: null, votedTurns: [] };
+  var state = { models: null, turnModels: [], votedTurns: [] };
 
   function isTurnVoted(index) {
     return state.votedTurns.indexOf(index) !== -1;
@@ -246,10 +246,11 @@
   function applyHeaders(turnIndex) {
     var root = $('.turn[data-turn="' + turnIndex + '"]');
     if (!root) return;
-    var show = isTurnVoted(turnIndex) && Boolean(state.models);
+    var models = state.turnModels[turnIndex] || state.models; // 每轮模型优先，回退整场（旧版分享）
+    var show = isTurnVoted(turnIndex) && Boolean(models);
     $$('.cell-title[data-side]', root).forEach(function (el) {
       var side = el.getAttribute('data-side');
-      el.textContent = show ? modelLabel(state.models, side) : (side === 'a' ? '模型 A' : '模型 B');
+      el.textContent = show ? modelLabel(models, side) : (side === 'a' ? '模型 A' : '模型 B');
     });
   }
 
@@ -336,6 +337,7 @@
 
   function showShare(data) {
     state.models = data.models || null;
+    state.turnModels = (Array.isArray(data.turns) ? data.turns : []).map(function (t) { return (t && t.models) || null; });
     state.votedTurns = Array.isArray(data.voted_turns) ? data.voted_turns.slice() : [];
     // 兼容旧版整场投票 cookie：data.voted === true 但没有 per-turn 信息时，所有轮次视为已投
     if (data.voted === true && state.votedTurns.length === 0 && Array.isArray(data.turns)) {
@@ -368,7 +370,8 @@
         throw new Error((data && data.message) || ('投票失败（HTTP ' + resp.status + '）'));
       }
       if (state.votedTurns.indexOf(turnIndex) === -1) state.votedTurns.push(turnIndex);
-      state.models = data.models || state.models;
+      // 每轮揭晓只更新该轮；旧版分享 data.models 是整场通用的，也只放进该轮（投过的轮次本来就显示）
+      if (data.models) state.turnModels[turnIndex] = data.models;
       applyHeaders(turnIndex);
       disableTurnButtons(turnIndex, choice);
     } catch (err) {

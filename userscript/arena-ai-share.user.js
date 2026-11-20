@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arena Blind Share
 // @namespace    https://github.com/Dwscdv3/arena-ai-vercel-sharing
-// @version      1.4.0
+// @version      1.5.0
 // @description  把当前 arena.ai 对战对话保存下来，生成「投票后才揭晓模型名」的匿名分享链接（由 Vercel 后端托管）
 // @author       Dwscdv3
 // @homepage     https://github.com/Dwscdv3/arena-ai-vercel-sharing
@@ -79,8 +79,10 @@
   // arena.ai 的用户提示词行/气泡带有这些右对齐/凸起表面标记，用于区分"我"说的话和模型的回答
   function hasUserSideMarker(el) {
     var node = el;
-    for (var i = 0; i < 10 && node && node.nodeType === 1 && node !== document.body && node !== document.documentElement; i += 1) {
+    for (var i = 0; i < 12 && node && node.nodeType === 1 && node !== document.body && node !== document.documentElement; i += 1) {
       var cls = (node.className && node.className.toString ? node.className.toString() : '').toLowerCase();
+      // 对话列表容器（ol[data-perf-target=transcript]）自带 justify-end，是边界：越过它继续往上找会把整页误判为用户消息
+      if (/flex-col-reverse/.test(cls) || (node.getAttribute && node.getAttribute('data-perf-target') === 'transcript')) return false;
       if (/justify-end|self-end|bg-surface-raised/.test(cls)) return true;
       node = node.parentElement;
     }
@@ -123,6 +125,40 @@
     return pos & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
   }
 
+  // arena.ai 的 transcript 外层是 flex-col-reverse：文档顺序与视觉顺序相反。
+  // 对战内部的 A/B 卡在文档序里不受影响，不能整体反转拍平数组：
+  // 改为按 transcript 的直接子节点倒序分组，组内保持文档顺序。
+  function transcriptIsReversed() {
+    try {
+      var ol = document.querySelector('[data-perf-target="transcript"]');
+      return !!(ol && /flex-col-reverse/.test(String(ol.className || '')));
+    } catch (_) { return false; }
+  }
+
+  function applyVisualOrder(items, getEl) {
+    var ol = null;
+    try { ol = document.querySelector('[data-perf-target="transcript"]'); } catch (_) { ol = null; }
+    var reversed = transcriptIsReversed();
+    if (!reversed) {
+      items.sort(function (a, b) { return byDocOrder(getEl(a), getEl(b)); });
+      return items;
+    }
+    var children = Array.prototype.slice.call(ol.children || []);
+    var rank = new Map();
+    for (var i = 0; i < children.length; i += 1) rank.set(children[i], children.length - 1 - i);
+    var groupOf = function (el) {
+      var node = el;
+      while (node && node.parentElement && node.parentElement !== ol) node = node.parentElement;
+      return node && node.parentElement === ol ? node : null;
+    };
+    items.forEach(function (it) {
+      var g = groupOf(getEl(it));
+      it._rank = (g && rank.has(g)) ? rank.get(g) : children.length;
+    });
+    items.sort(function (a, b) { return (a._rank - b._rank) || byDocOrder(getEl(a), getEl(b)); });
+    return items;
+  }
+
   // ---------- 基于「复制」按钮定位消息（arena.ai 每条消息都有复制按钮） ----------
 
   function findCopyButtons() {
@@ -134,6 +170,7 @@
     candidates.forEach(function (el) {
       if (!el || seen.has(el)) return;
       if (el.closest && el.closest('[data-abs-ignore]')) return; // 排除脚本自己的 UI
+      if (el.closest && el.closest('[data-code-block], pre, code')) return; // 排除代码块里的复制按钮
       var haystack = [
         el.getAttribute('aria-label'),
         el.getAttribute('title'),
@@ -151,21 +188,32 @@
     return out;
   }
 
-  // 从复制按钮向上找「包含除按钮文字外还有其它文字」的最小祖先，即消息块
+  // 消息块的判定：含正文（.prose/markdown/代码块/表格）或足够长的纯文本。
+  // 只含模型名徽标（如回答卡头部的 muse-spark-1.3-xhigh）不算消息块，继续往上找。
+  function hasMainContent(el) {
+    if (el.querySelector && el.querySelector('.prose, .markdown, .markdown-body, pre, table')) return true;
+    return (el.innerText || '').trim().length >= 200;
+  }
+
+  // 从复制按钮向上找最小的「含正文/足够长」的祖先，即消息块
   function messageContainerFor(btn) {
     var el = btn.parentElement;
+    var lastCandidate = null;
     for (var depth = 0; depth < 8 && el && el.nodeType === 1; depth += 1) {
-      if (el === document.body || el === document.documentElement) return null;
+      if (el === document.body || el === document.documentElement) return lastCandidate;
       var buttonsText = 0;
       var btns = el.querySelectorAll('button, [role="button"]');
       for (var i = 0; i < btns.length; i++) {
         buttonsText += (btns[i].innerText || '').trim().length;
       }
       var contentText = (el.innerText || '').trim().length - buttonsText;
-      if (contentText >= 1) return el;
+      if (contentText >= 1) {
+        if (hasMainContent(el)) return el;
+        if (!lastCandidate) lastCandidate = el; // 兜底：至少返回含文字的最小祖先
+      }
       el = el.parentElement;
     }
-    return null;
+    return lastCandidate;
   }
 
   // 从消息块里取正文：优先 .prose/markdown，否则取不含按钮的文本最长的直接子元素
@@ -264,7 +312,7 @@
       items.push({ el: container, text: text, kind: classifyMessageBlock(container) });
     });
     items = items.filter(function (it) { return isVisibleEl(it.el); });
-    items.sort(function (a, b) { return byDocOrder(a.el, b.el); });
+    applyVisualOrder(items, function (it) { return it.el; }); // 文档序 -> 视觉序
     return assembleTurns(dedupeItems(items));
   }
 
@@ -278,7 +326,7 @@
       .filter(function (el) { return !isModelIdLike(getText(el)); })
       .filter(function (el) { return isUserNode(el) || isAssistantNode(el); });
 
-    nodes.sort(byDocOrder);
+    applyVisualOrder(nodes, function (el) { return el; }); // 文档序 -> 视觉序
 
     var items = nodes.map(function (el) {
       return { el: el, text: getText(el), kind: kindFor(el) };
@@ -336,6 +384,42 @@
       if (k && answered[k] && !(t.responses.a && t.responses.a.trim()) && !(t.responses.b && t.responses.b.trim())) return false;
       return true;
     });
+  }
+
+  // 从回答卡里读取每侧模型名（揭晓后每张卡头部有 `Message from <name>` 的隐藏 h2，
+  // 或 span.truncate 内的模型 id）。返回按视觉顺序排列的 [{a, b} | null] 列表。
+  function extractBattleModels() {
+    try {
+      var carousels = Array.prototype.slice.call(document.querySelectorAll('[aria-roledescription="carousel"]'));
+      if (!carousels.length) return null;
+      carousels.sort(byDocOrder);
+      if (transcriptIsReversed()) carousels.reverse();
+      return carousels.map(function (carousel) {
+        var slides = Array.prototype.slice.call(carousel.querySelectorAll('[role="group"]')).filter(function (el) {
+          return (el.getAttribute('aria-roledescription') || '').toLowerCase() === 'slide';
+        });
+        var names = [];
+        for (var s = 0; s < slides.length; s += 1) {
+          var slide = slides[s];
+          var name = '';
+          var h2s = slide.querySelectorAll('h2');
+          for (var i = 0; i < h2s.length; i += 1) {
+            var bdi = h2s[i].querySelector ? h2s[i].querySelector('bdi') : null;
+            var t = ((bdi || h2s[i]).textContent || '').replace(/^Message from\s*/i, '').trim();
+            if (t) { name = t; break; }
+          }
+          if (!name) {
+            var trunc = slide.querySelectorAll('.truncate');
+            if (trunc.length) name = (trunc[0].textContent || '').trim();
+          }
+          if (name.length > 80) name = name.slice(0, 80);
+          names.push(name);
+        }
+        var a = names[0] || '', b = names[1] || '';
+        if (!a && !b) return null;
+        return { a: a, b: b };
+      });
+    } catch (_) { return null; }
   }
 
   function detectModelNames() {
@@ -424,12 +508,22 @@
       return (t.prompt && t.prompt.trim()) || t.responses.a.trim() || t.responses.b.trim();
     });
 
-    var modelNames = detectModelNames();
+    // 每轮对战可能有不同的模型对：按视觉顺序把模型名挂到对应轮次
+    var battleModels = extractBattleModels();
+    if (battleModels && battleModels.length === turns.length) {
+      turns = turns.map(function (t, i) {
+        return battleModels[i] ? Object.assign({}, t, { models: battleModels[i] }) : t;
+      });
+    }
+    // 顶层 models：仅当每场对战是同一对模型时回退（旧版后端/旧版分享页兼容）；否则交给每轮模型名
     var models = null;
-    if (modelNames.length >= 2) {
-      models = { a: modelNames[0], b: modelNames[1] };
-    } else if (modelNames.length === 1) {
-      models = { a: modelNames[0], b: '' };
+    var named = (battleModels || []).filter(function (m) { return m && (m.a || m.b); });
+    if (named.length && named.every(function (m) { return m.a === named[0].a && m.b === named[0].b; })) {
+      models = { a: named[0].a, b: named[0].b };
+    } else if (!named.length) {
+      var modelNames = detectModelNames();
+      if (modelNames.length >= 2) models = { a: modelNames[0], b: modelNames[1] };
+      else if (modelNames.length === 1) models = { a: modelNames[0], b: '' };
     }
 
     return {

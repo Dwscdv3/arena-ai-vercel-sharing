@@ -78,7 +78,7 @@ GET /api/admin/votes  ← Bearer <SHARE_TOKEN>，/admin.html 页面渲染统计
 | 方法 | 路径 | 鉴权 | 说明 |
 | --- | --- | --- | --- |
 | POST | `/api/shares` | `Bearer SHARE_TOKEN` | 创建分享，返回 `{ id, url, created_at }` |
-| GET | `/api/share/<id>` | 无 | 返回对话；任意一轮投票前模型名为 `null`，投过之后返回真名；`voted_turns` 列出已投票的轮次，`turn_tallies` 为分轮票数 |
+| GET | `/api/share/<id>` | 无 | 返回对话；每轮模型名仅在该轮投过票后随该轮返回（`turns[].models`），全场前 `models: null`；`voted_turns` 列出已投票的轮次，`turn_tallies` 为分轮票数 |
 | POST | `/api/vote/<id>` | 无（同浏览器逐轮防重复计票 cookie） | body: `{"choice":"a\|b\|tie\|bad","turn":<轮次,从0开始>}`，返回揭晓后的模型 + 该轮票数 |
 | GET | `/api/admin/votes` | `Bearer SHARE_TOKEN` | 所有分享的投票统计：每轮次明细 + 整场合计（`/admin.html` 页面使用） |
 
@@ -87,7 +87,7 @@ GET /api/admin/votes  ← Bearer <SHARE_TOKEN>，/admin.html 页面渲染统计
 ## 安全说明
 
 - `SHARE_TOKEN` 只通过环境变量和 GM 存储存在，仓库里没有任何真实 token（`.env*` 已 gitignore，`.env.example` 只有占位符）。
-- 模型名在服务端按「该浏览器是否已对任意一轮投票」决定是否返回（任意一轮投票前 `models: null`）；同一场对话两侧模型名相同，因此解锁一次即全场一致，但页面上每一轮也会单独要求先投票后才展示该轮名称。
+- 模型名在服务端按「该浏览器是否已投过该轮」决定是否返回：每轮模型名（`turns[].models`， arena.ai 每轮模型对可能不同）仅在该轮已投票时随该轮返回，未投票的轮次为 `null`；旧版分享没有每轮模型名，则投过任意一轮后整场 `models` 解锁。
 - 投票接口不要求登录（和公开投票一致），防重复计票依赖浏览器 cookie，可被清除绕过——如需强防刷，建议加验证码或登录。
 - `/admin.html` 使用 `crypto.timingSafeEqual` 比较 token。
 

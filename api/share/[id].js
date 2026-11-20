@@ -57,15 +57,24 @@ module.exports = async function handler(req, res) {
     turnTallies = null;
   }
 
+  // 每轮模型名：仅对该轮已投票的浏览器返回；顶层 models 仅为旧版（无每轮模型名）的回退
+  const hasPerTurn = turns.some((t) => t && t.models && ((t.models.a && t.models.a.trim()) || (t.models.b && t.models.b.trim())));
+  const turnsOut = turns.map((t, i) => {
+    const base = { prompt: (t && t.prompt) || '', responses: (t && t.responses) || { a: '', b: '' } };
+    if (t && t.models && ((t.models.a && t.models.a.trim()) || (t.models.b && t.models.b.trim()))) {
+      base.models = votedTurns.includes(i) ? { a: t.models.a || '', b: t.models.b || '' } : null;
+    }
+    return base;
+  });
+
   sendJson(res, 200, {
     id: share.id,
     created_at: share.created_at,
     title: share.title,
     source_url: share.source_url,
-    turns,
-    // 模型名是整场对话共用的：投过任意一轮后匿名才解除（投票前像 arena.ai 一样隐藏）；
-    // 每一轮在自己投票之前，界面上依然先显示“模型 A / 模型 B”
-    models: anyVoted ? share.models : null,
+    turns: turnsOut,
+    // 新版分享：每轮各自揭晓；旧版分享（无每轮模型名）：投过任意一轮后整场解锁
+    models: hasPerTurn ? null : (anyVoted ? share.models : null),
     voted: legacyVoted,
     voted_turns: votedTurns,
     tallies,

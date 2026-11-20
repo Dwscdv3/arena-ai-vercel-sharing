@@ -50,6 +50,7 @@ module.exports = async function handler(req, res) {
               index: i,
               prompt: snippet(share.turns[i] && share.turns[i].prompt, 80),
               tallies: { ...(perTurn[String(i)] || EMPTY_TALLIES) },
+              models: (share.turns[i] && share.turns[i].models) || null,
             });
           }
           return {

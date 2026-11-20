@@ -74,7 +74,8 @@
   .turn-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; font-variant-numeric: tabular-nums; }
   .turn-table th, .turn-table td { text-align: left; padding: 7px 10px; border-top: 1px solid var(--border); }
   .turn-table th { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; }
-  .turn-table td.prompt-cell { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+  .turn-table .turn-models { color: var(--muted); font-size: 0.75rem; margin-top: 2px; }
+  .prompt-cell { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -137,10 +138,13 @@
       return '<tr><td colspan="7" style="color:var(--muted)">（无轮次数据）</td></tr>';
     }
     return turns.map(function (t) {
+      var modelsLine = (t.models && (t.models.a || t.models.b))
+        ? '<div class="turn-models">A：' + escapeHtml(t.models.a || '?') + ' · B：' + escapeHtml(t.models.b || '?') + '</div>'
+        : '';
       return (
         '<tr>' +
           '<td>第 ' + (t.index + 1) + ' 轮</td>' +
-          '<td class="prompt-cell" title="' + escapeHtml(t.prompt) + '">' + escapeHtml(t.prompt || '（无提示词）') + '</td>' +
+          '<td class="prompt-cell" title="' + escapeHtml(t.prompt) + '">' + escapeHtml(t.prompt || '（无提示词）') + modelsLine + '</td>' +
           '<td>' + t.tallies.a + '</td>' +
           '<td>' + t.tallies.b + '</td>' +
           '<td>' + t.tallies.tie + '</td>' +
@@ -152,7 +156,10 @@
   }
 
   function renderShare(s) {
-    var models = s.models ? ('模型：A = ' + s.models.a + '，B = ' + s.models.b) : '模型：未揭晓';
+    var perTurn = (s.turns || []).some(function (t) { return t.models && (t.models.a || t.models.b); });
+    var models = s.models
+      ? ('模型：A = ' + s.models.a + '，B = ' + s.models.b)
+      : (perTurn ? '模型：见各轮' : '模型：未揭晓');
     return (
       '<section class="share">' +
         '<div class="share-head">' +
